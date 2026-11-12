@@ -1,0 +1,245 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  SUPER_ADMIN
+  ADMIN
+  EMPLOYEE
+
+  @@map("用户角色")
+}
+
+enum EmploymentStatus {
+  ACTIVE
+  RESIGNED
+  SUSPENDED
+
+  @@map("员工状态")
+}
+
+enum AccountStatus {
+  ACTIVE
+  DISABLED
+
+  @@map("账号状态")
+}
+
+enum ImportBatchStatus {
+  PREVIEW
+  QUEUED
+  PROCESSING
+  COMPLETED
+  FAILED
+
+  @@map("导入批次状态")
+}
+
+enum ImportFileStatus {
+  PREVIEW
+  DUPLICATE
+  PROCESSING
+  COMPLETED
+  FAILED
+
+  @@map("导入文件状态")
+}
+
+model Product {
+  productId            String            @id @map("商品ID") @db.VarChar(80)
+  productName          String            @map("商品名称") @db.Text
+  productUrl           String?           @map("商品链接") @db.Text
+  shopName             String?           @map("店铺名称") @db.VarChar(255)
+  shopType             String?           @map("店铺类型") @db.VarChar(80)
+  imageUrl             String?           @map("商品图片链接") @db.Text
+  latestCategory       String?           @map("最新类目名称") @db.VarChar(255)
+  latestCategoryLevel1 String?           @map("最新一级类目") @db.VarChar(255)
+  latestCategoryLevel2 String?           @map("最新二级类目") @db.VarChar(255)
+  firstWeekStart       DateTime?         @map("首次上榜日期") @db.Date
+  latestWeekStart      DateTime?         @map("最近上榜日期") @db.Date
+  latestWeekEnd        DateTime?         @map("最近上榜结束日期") @db.Date
+  latestRank           Int?              @map("最近行业排名")
+  historyWeekCount     Int               @default(0) @map("历史上榜周数")
+  historyRecordCount   Int               @default(0) @map("历史记录条数")
+  consecutiveWeekCount Int               @default(0) @map("连续上榜周数")
+  latestVisitorRaw     String?           @map("最新访客数原值") @db.VarChar(100)
+  latestVisitorMin     Decimal?          @map("最新访客数下限") @db.Decimal(20, 2)
+  latestVisitorMax     Decimal?          @map("最新访客数上限") @db.Decimal(20, 2)
+  latestVisitorMedian  Decimal?          @map("最新访客数中值") @db.Decimal(20, 2)
+  latestBuyerRaw       String?           @map("最新支付买家数原值") @db.VarChar(100)
+  latestBuyerMin       Decimal?          @map("最新支付买家数下限") @db.Decimal(20, 2)
+  latestBuyerMax       Decimal?          @map("最新支付买家数上限") @db.Decimal(20, 2)
+  latestBuyerMedian    Decimal?          @map("最新支付买家数中值") @db.Decimal(20, 2)
+  latestCartRaw        String?           @map("最新加购人数原值") @db.VarChar(100)
+  latestCartMin        Decimal?          @map("最新加购人数下限") @db.Decimal(20, 2)
+  latestCartMax        Decimal?          @map("最新加购人数上限") @db.Decimal(20, 2)
+  latestCartMedian     Decimal?          @map("最新加购人数中值") @db.Decimal(20, 2)
+  createdAt            DateTime          @default(now()) @map("创建时间")
+  updatedAt            DateTime          @updatedAt @map("更新时间")
+  histories            ProductHistory[]
+  favorites            ProductFavorite[]
+
+  @@index([productName])
+  @@index([shopName])
+  @@index([latestCategory, latestWeekStart])
+  @@index([latestCategoryLevel1, latestCategoryLevel2])
+  @@map("商品主表")
+}
+
+model ProductHistory {
+  id              String      @id @default(cuid()) @map("历史记录ID") @db.VarChar(30)
+  productId       String      @map("商品ID") @db.VarChar(80)
+  weekStart       DateTime    @map("周开始日期") @db.Date
+  weekEnd         DateTime    @map("周结束日期") @db.Date
+  rawPeriod       String      @map("原始日期范围") @db.VarChar(80)
+  categoryName    String      @map("类目名称") @db.VarChar(255)
+  categoryLevel1  String      @map("一级类目") @db.VarChar(255)
+  categoryLevel2  String?     @map("二级类目") @db.VarChar(255)
+  rank            Int?        @map("行业排名")
+  trend           String?     @map("趋势") @db.VarChar(80)
+  visitorRaw      String?     @map("访客数原值") @db.VarChar(100)
+  visitorMin      Decimal?    @map("访客数下限") @db.Decimal(20, 2)
+  visitorMax      Decimal?    @map("访客数上限") @db.Decimal(20, 2)
+  visitorMedian   Decimal?    @map("访客数中值") @db.Decimal(20, 2)
+  buyerRaw        String?     @map("支付买家数原值") @db.VarChar(100)
+  buyerMin        Decimal?    @map("支付买家数下限") @db.Decimal(20, 2)
+  buyerMax        Decimal?    @map("支付买家数上限") @db.Decimal(20, 2)
+  buyerMedian     Decimal?    @map("支付买家数中值") @db.Decimal(20, 2)
+  cartRaw         String?     @map("加购人数原值") @db.VarChar(100)
+  cartMin         Decimal?    @map("加购人数下限") @db.Decimal(20, 2)
+  cartMax         Decimal?    @map("加购人数上限") @db.Decimal(20, 2)
+  cartMedian      Decimal?    @map("加购人数中值") @db.Decimal(20, 2)
+  exportTime      DateTime?   @map("导出时间")
+  sourceFileId    String?     @map("来源文件ID") @db.VarChar(30)
+  sourceFileName  String?     @map("来源文件名") @db.Text
+  sourceRowNumber Int?        @map("来源行号")
+  importedAt      DateTime    @default(now()) @map("导入时间")
+  product         Product     @relation(fields: [productId], references: [productId], onDelete: Cascade)
+  sourceFile      ImportFile? @relation(fields: [sourceFileId], references: [id], onDelete: SetNull)
+
+  @@unique([productId, weekStart, categoryName], map: "商品上榜历史_业务唯一键")
+  @@index([productId, weekStart])
+  @@index([categoryLevel1, categoryLevel2])
+  @@index([weekStart, categoryName, rank])
+  @@map("商品上榜历史表")
+}
+
+model Category {
+  id             String   @id @default(cuid()) @map("类目ID") @db.VarChar(30)
+  categoryName   String   @unique @map("类目名称") @db.VarChar(255)
+  categoryLevel1 String   @map("一级类目") @db.VarChar(255)
+  categoryLevel2 String?  @map("二级类目") @db.VarChar(255)
+  enabled        Boolean  @default(true) @map("是否启用")
+  createdAt      DateTime @default(now()) @map("创建时间")
+  updatedAt      DateTime @updatedAt @map("更新时间")
+
+  @@index([categoryLevel1, categoryLevel2])
+  @@map("类目表")
+}
+
+model ImportBatch {
+  id               String            @id @default(cuid()) @map("批次ID") @db.VarChar(30)
+  operatorId       String?           @map("操作人ID") @db.VarChar(30)
+  status           ImportBatchStatus @default(PREVIEW) @map("批次状态")
+  totalFiles       Int               @default(0) @map("总文件数")
+  totalRows        Int               @default(0) @map("总数据行数")
+  importedRows     Int               @default(0) @map("成功入库行数")
+  duplicateRows    Int               @default(0) @map("重复行数")
+  errorRows        Int               @default(0) @map("失败行数")
+  newProducts      Int               @default(0) @map("新增商品数")
+  createdHistories Int               @default(0) @map("新增历史记录数")
+  updatedHistories Int               @default(0) @map("更新历史记录数")
+  errorSummary     String?           @map("错误摘要") @db.Text
+  createdAt        DateTime          @default(now()) @map("上传时间")
+  startedAt        DateTime?         @map("开始时间")
+  completedAt      DateTime?         @map("完成时间")
+  files            ImportFile[]
+
+  @@index([status, createdAt])
+  @@map("导入批次表")
+}
+
+model ImportFile {
+  id            String           @id @default(cuid()) @map("文件记录ID") @db.VarChar(30)
+  batchId       String           @map("批次ID") @db.VarChar(30)
+  originalName  String           @map("原始文件名") @db.Text
+  sha256        String           @map("文件SHA256") @db.Char(64)
+  fileSize      BigInt           @map("文件大小")
+  sheetName     String?          @map("工作表名称") @db.VarChar(255)
+  weekStart     DateTime?        @map("周开始日期") @db.Date
+  weekEnd       DateTime?        @map("周结束日期") @db.Date
+  categoryName  String?          @map("类目名称") @db.VarChar(255)
+  rowCount      Int              @default(0) @map("原始数据行数")
+  importedCount Int              @default(0) @map("成功行数")
+  errorCount    Int              @default(0) @map("失败行数")
+  status        ImportFileStatus @default(PREVIEW) @map("文件状态")
+  storagePath   String           @map("存储路径") @db.Text
+  sourceName    String?          @map("合并来源文件名") @db.Text
+  errorsJson    String?          @map("错误明细") @db.Text
+  batch         ImportBatch      @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  histories     ProductHistory[]
+
+  @@index([sha256])
+  @@index([batchId, status])
+  @@map("导入文件表")
+}
+
+model User {
+  id               String            @id @default(cuid()) @map("用户ID") @db.VarChar(30)
+  username         String            @unique @map("登录账号") @db.VarChar(80)
+  passwordHash     String            @map("密码哈希") @db.VarChar(255)
+  name             String            @map("员工姓名") @db.VarChar(100)
+  employeeNo       String?           @unique @map("员工编号") @db.VarChar(80)
+  department       String?           @map("所属部门") @db.VarChar(120)
+  role             UserRole          @default(EMPLOYEE) @map("用户角色")
+  employmentStatus EmploymentStatus  @default(ACTIVE) @map("员工状态")
+  accountStatus    AccountStatus     @default(ACTIVE) @map("账号状态")
+  canImport        Boolean           @default(false) @map("允许导入")
+  createdAt        DateTime          @default(now()) @map("创建时间")
+  updatedAt        DateTime          @updatedAt @map("更新时间")
+  sessions         LoginSession[]
+  favorites        ProductFavorite[]
+
+  @@index([role, accountStatus, employmentStatus])
+  @@map("系统用户表")
+}
+
+model LoginSession {
+  id        String   @id @default(cuid()) @map("会话ID") @db.VarChar(30)
+  userId    String   @map("用户ID") @db.VarChar(30)
+  tokenHash String   @unique @map("会话令牌哈希") @db.Char(64)
+  expiresAt DateTime @map("过期时间")
+  createdAt DateTime @default(now()) @map("创建时间")
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, expiresAt])
+  @@map("登录会话表")
+}
+
+model ProductFavorite {
+  userId    String   @map("用户ID") @db.VarChar(30)
+  productId String   @map("商品ID") @db.VarChar(80)
+  createdAt DateTime @default(now()) @map("收藏时间")
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  product   Product  @relation(fields: [productId], references: [productId], onDelete: Cascade)
+
+  @@id([userId, productId])
+  @@index([productId])
+  @@map("商品收藏表")
+}
+
+model IpWhitelist {
+  id        String   @id @default(cuid()) @map("规则ID") @db.VarChar(30)
+  cidr      String   @unique @map("IP或网段") @db.VarChar(100)
+  label     String   @map("备注") @db.VarChar(120)
+  enabled   Boolean  @default(true) @map("是否启用")
+  createdAt DateTime @default(now()) @map("创建时间")
+  updatedAt DateTime @updatedAt @map("更新时间")
+
+  @@map("公司IP白名单表")
+}
