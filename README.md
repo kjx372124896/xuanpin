@@ -1,6 +1,6 @@
 # 选品数据中心
 
-公司内部使用的商品榜单导入与选品分析网页工具。前后端均使用 TypeScript，数据存储在 PostgreSQL；本地开发，生产环境使用 Docker Compose 部署。
+公司内部使用的商品榜单导入与选品分析网页工具。前后端均使用 TypeScript，数据存储在 PostgreSQL；本地开发，生产环境推荐使用 Linux 原生一键部署（Node.js + systemd + Nginx），无需 Docker。
 
 ## 当前功能
 
@@ -27,6 +27,7 @@
 | 数据库 | PostgreSQL 17、Prisma 6 |
 | Excel | ExcelJS + fflate（兼容生意参谋工作簿中的 Excel Table 关系） |
 | 包管理 | pnpm 10 |
+| 生产运行 | 单个 Node.js 服务同时托管 API 与前端静态文件；systemd 管理进程 |
 
 ## 本地开发
 
@@ -110,7 +111,7 @@ pnpm dev:web
 4. 在扩展弹窗点击「打开达摩盘并自动同步」，正常登录达摩盘。扩展监听 `model/list` 请求，并通过 Chrome Cookies API 自动获取适用于达摩盘域名的 Cookie（包括 HttpOnly），不需要开发者工具或手动复制。
 5. Cookie 通过配套扩展的 HTTPS 授权接口发送到选品工具，后端 AES-256-GCM 加密保存。扩展每15分钟同步一次在线状态；达摩盘请求返回401/403或登录重定向时，浏览器会通知重新登录。重新登录后的 `model/list` 成功请求会自动更新凭证。
 
-扩展绑定令牌有效期为90天，可在授权页解绑并重新配对。扩展只保存绑定令牌，不保存 Cookie；解绑后服务端立即拒绝旧令牌。后端 AI 管家请求仍由选品工具 API 发出，因此达摩盘看到的是服务器出口 IP；如果登录电脑与服务器出口 IP 不同，仍可能触发达摩盘风控。生产环境必须在 `deploy/.env` 配置独立且长期备份的 `DMP_CREDENTIAL_ENCRYPTION_KEY`，并保留示例中的 `DMP_EXTENSION_ID`。
+扩展绑定令牌有效期为90天，可在授权页解绑并重新配对。扩展只保存绑定令牌，不保存 Cookie；解绑后服务端立即拒绝旧令牌。后端 AI 管家请求仍由选品工具 API 发出，因此达摩盘看到的是服务器出口 IP；如果登录电脑与服务器出口 IP 不同，仍可能触发达摩盘风控。生产环境必须在项目根目录 `.env` 配置独立且长期备份的 `DMP_CREDENTIAL_ENCRYPTION_KEY`，并保留示例中的 `DMP_EXTENSION_ID`。
 
 AI 调用使用抓包确认的 `singleSkillPicker` 技能选择器（技能 ID `1546`，技能名 `MsU_6259609296_competitor_core_metrics_comparison`），并使用 `standard` 模型。AI 豆余额读取 `/api_2/credits/balance-overview`；该接口仅用于余额预检，不代表能准确预估本次分析的消耗。每个批次会持久化会话 ID；AI talk 请求超时或结果不确定时只读取会话历史，不自动重发收费请求。
 
@@ -151,18 +152,69 @@ AI 调用使用抓包确认的 `singleSkillPicker` 技能选择器（技能 ID `
 
 这些数据只在本地开发数据库中，不会自动进入生产数据库。`.local-db`、上传文件和 `.env` 均不会提交到 Git。
 
-## 生产部署
+## Linux 原生生产部署（推荐，不使用 Docker）
 
-生产部署文件位于 `deploy/`。先复制 `deploy/.env.production.example` 为 `deploy/.env`，设置数据库密码、管理员初始密码和正式访问域名，然后：
+### 首次部署
 
-```powershell
-cd deploy
-docker compose up -d --build
+服务器需要预先安装 Node.js 22.12+（推荐 24 LTS）、Corepack/pnpm 10.34.9、Git、正在运行的 PostgreSQL 和 systemd。**不需要提前创建数据库或应用账号**：首次部署时，程序会自动创建 PostgreSQL 应用角色和数据库，再自动执行 Prisma 迁移。它不会自动安装 PostgreSQL 服务。
+
+```bash
+cd /opt
+git clone https://github.com/kjx372124896/xuanpin.git
+cd /opt/xuanpin
+cp .env.production.example .env
+nano .env
+pnpm deploy:linux
 ```
 
-网页容器绑定服务器本机 `127.0.0.1:8080`。需要在服务器已有的 HTTPS 反向代理中将域名转发到该地址，并保留客户端 `X-Forwarded-For` 来源 IP；Compose 中 `TRUST_PROXY=2` 按“外层 HTTPS 代理 + 容器内 Nginx”两层代理配置，代理层数不同需要同步调整。PostgreSQL 只在 Docker 内部网络开放，不映射公网端口。数据库数据和 Excel 上传文件分别保存在 Docker named volume 中。
+部署命令会自动执行 `pnpm install --frozen-lockfile`，不需要手动安装依赖。如果服务器的 pnpm 版本不是 10.34.9，再执行 `corepack prepare pnpm@10.34.9 --activate` 后部署。
 
-首次启动 API 容器时会执行 Prisma migration 和管理员初始化。生产环境请使用独立的 `.env`，不要复制本地 `.env` 或 `.local-db`。
+`.env` 只需要填写以下项目：
+
+- `WEB_ORIGIN`：正式 HTTPS 域名，例如 `https://pick.example.com`。
+- `ADMIN_PASSWORD`：首次初始化超级管理员使用，至少 8 位；如果管理员已存在，重复部署不会覆盖其密码。
+- `DMP_CREDENTIAL_ENCRYPTION_KEY`：64位十六进制密钥，可用 `openssl rand -hex 32` 生成。必须长期备份，丢失后无法解密已保存的达摩盘凭证。
+- `COOKIE_SECURE=true`：生产 HTTPS 环境必须开启。
+- `POSTGRES_DB` / `POSTGRES_USER`：数据库和应用账号名称，默认分别为 `selection_tool`、`selection_app`，通常无需修改。
+- `POSTGRES_PASSWORD`：应用数据库密码。首次创建新账号时留空即可，程序会自动生成并写回 `.env`；如果复用已存在的 PostgreSQL 账号，则必须填写该账号原密码，部署程序不会擅自修改已有账号密码。
+- `POSTGRES_HOST` / `POSTGRES_PORT`：应用连接 PostgreSQL 的地址，默认 `127.0.0.1:5432`。
+- `POSTGRES_ADMIN_URL`：仅当 PostgreSQL 不在本机，或不能通过本机 `postgres` 系统账号管理时填写具有 `CREATEROLE`、`CREATEDB` 权限的管理连接。该连接会被移入权限为 `600` 的 `.deploy.env`，不会交给应用进程读取。
+
+第一次执行 `pnpm deploy:linux` 时，如果根目录没有 `.env`，脚本会自动从 `.env.production.example` 创建并退出；编辑好 `.env` 后再次执行即可。
+
+本机 PostgreSQL 自动建库默认使用 `runuser -u postgres`（root 部署）或 `sudo -u postgres`（普通部署用户），所以需要系统 PostgreSQL 服务已启动，并允许当前部署用户通过该方式执行管理命令。若使用远程数据库，配置 `POSTGRES_ADMIN_URL` 即可；远程管理连接会单独保存在 `.deploy.env`，以后更新时也需要保留该文件，且建议使用 root 执行更新。
+
+自动创建过程是幂等的：数据库不存在时创建数据库并指定应用账号为所有者；应用账号不存在时创建；如果账号已存在则不修改其密码，只使用 `.env` 中的密码验证连接，并拒绝使用具有超级用户/建库管理权限的账号。数据库已存在且所有者正确时只检查连接和权限，不删除、不清空、不重置任何数据。若发现同名数据库由其他账号拥有，程序会停止并提示，不会擅自改写已有数据库对象的所有权。
+
+建库成功后，程序会把自动生成的应用数据库密码和完整 `DATABASE_URL` 写回根目录 `.env`。后续更新会复用同一组凭据，不会每次重新生成密码。
+
+如果从旧版部署升级，`.env` 中只有旧的 `DATABASE_URL` 而没有新的 `POSTGRES_*` 配置，部署程序会优先从旧连接串读取原数据库名、账号和密码，避免误创建另一套数据库或重置旧账号密码。
+
+部署脚本自动完成：依赖安装、Prisma Client 生成、数据库迁移、超级管理员初始化、前后端构建、上传目录准备、systemd 服务安装/开机自启、启动及 HTTP 健康检查。默认服务名为 `xuanpin-api`，监听 `127.0.0.1:3001`；root 用户部署时会创建专用 `xuanpin` 系统账号运行服务，普通用户部署时使用当前用户并通过 sudo 安装 systemd 服务。
+
+### Nginx 反向代理
+
+前后端已由同一个 Node.js 服务提供。只需要在现有 HTTPS 域名的 Nginx `server` 块中加入 `deploy/nginx.native.conf` 的 `location /` 反向代理配置，将所有请求转发到 `127.0.0.1:3001`。TLS 证书仍由现有 Nginx/面板管理；不要再把网页根目录指向 `apps/web/dist`，也不需要单独部署前端容器。
+
+### 日常更新
+
+```bash
+cd /opt/xuanpin
+pnpm update:linux
+```
+
+更新命令会检查工作区无未提交改动后，从 GitHub `main` 拉取代码，安装锁定依赖、生成 Prisma Client、执行向前迁移、初始化（不会覆盖已有管理员）、构建并重启服务。它不会删除 `.env`、数据库或上传文件，也不会执行 `migrate reset`。
+
+### 服务管理与排错
+
+```bash
+systemctl status xuanpin-api
+journalctl -u xuanpin-api -f
+systemctl restart xuanpin-api
+curl http://127.0.0.1:3001/api/health
+```
+
+`.env`、数据库、`apps/api/storage/uploads` 和达摩盘加密密钥都需要独立备份。不要删除上传目录或执行数据库重置命令。原有 `deploy/docker-compose.yml` 保留作兼容方案，但上述推荐部署流程不依赖 Docker。
 
 ## 主要目录
 
@@ -172,7 +224,7 @@ apps/web/       React 网页端
 apps/browser-extension/ Chrome / EGO Manifest V3 达摩盘登录助手
 packages/shared 前后端共享类型
 prisma/         PostgreSQL 数据模型与迁移
-deploy/         Dockerfile、Compose、Nginx 配置
-scripts/        本地 PostgreSQL 启停脚本
+deploy/         原生 Nginx 反向代理片段及可选 Docker 部署配置
+scripts/        Linux 一键部署/更新、本地 PostgreSQL 启停脚本
 docs/           设计与后续维护文档
 ```
