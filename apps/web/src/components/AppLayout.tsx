@@ -1,5 +1,5 @@
 import { Button, Layout, Menu, Space } from "antd";
-import { DatabaseOutlined, ImportOutlined, LogoutOutlined, SettingOutlined, ShopOutlined } from "@ant-design/icons";
+import { DatabaseOutlined, ImportOutlined, KeyOutlined, LogoutOutlined, SettingOutlined, ShopOutlined } from "@ant-design/icons";
 import { Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
 
@@ -15,6 +15,7 @@ export function AppLayout() {
   const isProductList = location.pathname === "/";
   const items = [
     { key: "/", icon: <ShopOutlined />, label: "商品选品" },
+    ...(isAdmin ? [{ key: "/dmp-auth", icon: <KeyOutlined />, label: "达摩盘授权 / 后台任务" }] : []),
     ...(user?.role !== "EMPLOYEE" || user.canImport ? [{ key: "/imports", icon: <ImportOutlined />, label: "数据导入" }] : []),
     ...(isAdmin ? [{ key: "/admin", icon: <SettingOutlined />, label: "管理员设置" }] : []),
   ];

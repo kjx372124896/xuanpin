@@ -13,6 +13,9 @@
 - 商品列表展示支付买家数首期至最新期的中值折线趋势；商品详情展示支付买家数/访客数趋势和结构化历史数值。
 - 选品筛选支持最新上榜周日期多选、最新周期支付买家数中值阈值、上榜周数/连续周数范围、一级类目→二级类目级联及“我的收藏”；不提供行业排名筛选。
 - 商品详情在列表内以弹窗打开；商品收藏保存在 PostgreSQL，按登录用户隔离。
+- 商品列表支持跨页多选与当前页全选；选品工具后端直接调用达摩盘 AI 管家，每50个商品ID创建一个独立会话。
+- 达摩盘登录态由配套 Manifest V3 浏览器扩展自动捕获；Request URL 与 Cookie 按登录用户独立保存，并使用 AES-256-GCM 加密写入 PostgreSQL，网页端不接触 Cookie 明文。
+- AI 管家返回的上期销售额、销售额、点击率、转化率、加购率、加购成本、投产比、件单价、花费和 CPC 以原始区间文本保存，不反推精确值。
 - 导入任务在 API 进程内后台执行，任务状态保存在 PostgreSQL；API 重启后会重新接续排队/处理中批次。
 
 ## 技术栈
@@ -41,7 +44,13 @@
 Copy-Item .env.example .env
 ```
 
-编辑根目录 `.env`，至少修改 `DATABASE_URL` 和 `ADMIN_PASSWORD`。本项目当前开发机使用的本地数据库配置为：
+编辑根目录 `.env`，至少修改 `DATABASE_URL`、`ADMIN_PASSWORD`，并配置 `DMP_CREDENTIAL_ENCRYPTION_KEY`。加密密钥使用以下命令生成，必须妥善备份；密钥丢失或更换后，已保存的达摩盘凭证将无法解密：
+
+```powershell
+node -e "console.log(require('node:crypto').randomBytes(32).toString('hex'))"
+```
+
+将生成的64位十六进制字符填入 `.env` 的 `DMP_CREDENTIAL_ENCRYPTION_KEY`。本项目当前开发机使用的本地数据库配置为：
 
 ```env
 DATABASE_URL=postgresql://selection_dev:selection_dev@127.0.0.1:55432/selection_tool_dev?schema=public
@@ -92,6 +101,18 @@ pnpm dev
 pnpm dev:api
 pnpm dev:web
 ```
+
+### 5. 配置达摩盘 AI 管家授权
+
+1. 登录选品工具，进入左侧「达摩盘授权」。
+2. 在 Chrome / EGO 浏览器打开 `chrome://extensions`，启用开发者模式，选择「加载已解压的扩展程序」，加载 `apps/browser-extension` 文件夹。
+3. 回到选品工具「达摩盘授权」页面，生成12位一次性配对码；点击浏览器工具栏的「达摩盘登录助手」，输入配对码完成绑定。配对码5分钟有效。
+4. 在扩展弹窗点击「打开达摩盘并自动同步」，正常登录达摩盘。扩展监听 `model/list` 请求，并通过 Chrome Cookies API 自动获取适用于达摩盘域名的 Cookie（包括 HttpOnly），不需要开发者工具或手动复制。
+5. Cookie 通过配套扩展的 HTTPS 授权接口发送到选品工具，后端 AES-256-GCM 加密保存。扩展每15分钟同步一次在线状态；达摩盘请求返回401/403或登录重定向时，浏览器会通知重新登录。重新登录后的 `model/list` 成功请求会自动更新凭证。
+
+扩展绑定令牌有效期为90天，可在授权页解绑并重新配对。扩展只保存绑定令牌，不保存 Cookie；解绑后服务端立即拒绝旧令牌。后端 AI 管家请求仍由选品工具 API 发出，因此达摩盘看到的是服务器出口 IP；如果登录电脑与服务器出口 IP 不同，仍可能触发达摩盘风控。生产环境必须在 `deploy/.env` 配置独立且长期备份的 `DMP_CREDENTIAL_ENCRYPTION_KEY`，并保留示例中的 `DMP_EXTENSION_ID`。
+
+AI 调用使用抓包确认的 `singleSkillPicker` 技能选择器（技能 ID `1546`，技能名 `MsU_6259609296_competitor_core_metrics_comparison`），并使用 `standard` 模型。AI 豆余额读取 `/api_2/credits/balance-overview`；该接口仅用于余额预检，不代表能准确预估本次分析的消耗。每个批次会持久化会话 ID；AI talk 请求超时或结果不确定时只读取会话历史，不自动重发收费请求。
 
 首次登录超级管理员后，进入「管理员设置 → IP 白名单」添加普通员工允许访问的公网 IP/CIDR。管理员自身不受白名单限制。白名单为空时，普通员工默认不能登录。
 
@@ -148,6 +169,7 @@ docker compose up -d --build
 ```text
 apps/api/       NestJS API、登录权限、Excel 导入、商品查询
 apps/web/       React 网页端
+apps/browser-extension/ Chrome / EGO Manifest V3 达摩盘登录助手
 packages/shared 前后端共享类型
 prisma/         PostgreSQL 数据模型与迁移
 deploy/         Dockerfile、Compose、Nginx 配置

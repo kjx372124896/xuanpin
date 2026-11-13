@@ -1,0 +1,34 @@
+{
+  "manifest_version": 3,
+  "name": "选品工具 · 达摩盘登录助手",
+  "version": "1.0.1",
+  "description": "自动同步达摩盘登录凭证，区分登录跳转与接口权限或风控异常。不会要求手动复制 Cookie。",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA7J11sPzzq57jYmu2+a0SWw/4nA6R5igJMS4yQTOOTT1yOpll5QHF31uNXEBHeJCXf5Kv9iH8MonDmHgU9jV3VS5X+8pvB0++0vjuiZGsWGoiufWejSW1zsDKdkHr4L2+gojJa7VONhSNudmAsPsHMnikoeyRhmKwJJ7odTqeEYGb9FnMpZVPBmLeRYsdb9TLx45LwI08gSg/KibALlwStKv5JksXKPmWgSlLaM9vKilmfC2ktxE8FbARWezkUKWpjeJwXO9iQbG29kLu/7mbPgsMpOQYIWreODANfIETecAtmscMVBZqqozbYUsLQbk7u+sGkzLBztok5JNTOgWKDwIDAQAB",
+  "permissions": [
+    "activeTab",
+    "alarms",
+    "cookies",
+    "notifications",
+    "storage",
+    "webRequest"
+  ],
+  "host_permissions": [
+    "https://dmp.taobao.com/*",
+    "https://dmp.advgateway.taobao.com/*"
+  ],
+  "optional_host_permissions": [
+    "http://localhost/*",
+    "http://127.0.0.1/*",
+    "https://*/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "达摩盘登录助手"
+  },
+  "icons": {
+    "128": "icons/icon128.png"
+  }
+}

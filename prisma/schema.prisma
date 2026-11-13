@@ -79,6 +79,17 @@ model Product {
   latestCartMin        Decimal?          @map("最新加购人数下限") @db.Decimal(20, 2)
   latestCartMax        Decimal?          @map("最新加购人数上限") @db.Decimal(20, 2)
   latestCartMedian     Decimal?          @map("最新加购人数中值") @db.Decimal(20, 2)
+  aiPreviousSales      String?           @map("上期销售额") @db.Text
+  aiSales              String?           @map("销售额") @db.Text
+  aiClickRate          String?           @map("点击率") @db.Text
+  aiConversionRate     String?           @map("转化率") @db.Text
+  aiAddToCartRate      String?           @map("加购率") @db.Text
+  aiAddToCartCost      String?           @map("加购成本") @db.Text
+  aiRoi                String?           @map("投产比") @db.Text
+  aiUnitPrice          String?           @map("件单价") @db.Text
+  aiSpend              String?           @map("花费") @db.Text
+  aiCpc                String?           @map("CPC") @db.Text
+  aiMetricsFetchedAt   DateTime?         @map("AI数据获取时间")
   createdAt            DateTime          @default(now()) @map("创建时间")
   updatedAt            DateTime          @updatedAt @map("更新时间")
   histories            ProductHistory[]
@@ -88,6 +99,7 @@ model Product {
   @@index([shopName])
   @@index([latestCategory, latestWeekStart])
   @@index([latestCategoryLevel1, latestCategoryLevel2])
+  @@index([aiMetricsFetchedAt])
   @@map("商品主表")
 }
 
@@ -190,20 +202,24 @@ model ImportFile {
 }
 
 model User {
-  id               String            @id @default(cuid()) @map("用户ID") @db.VarChar(30)
-  username         String            @unique @map("登录账号") @db.VarChar(80)
-  passwordHash     String            @map("密码哈希") @db.VarChar(255)
-  name             String            @map("员工姓名") @db.VarChar(100)
-  employeeNo       String?           @unique @map("员工编号") @db.VarChar(80)
-  department       String?           @map("所属部门") @db.VarChar(120)
-  role             UserRole          @default(EMPLOYEE) @map("用户角色")
-  employmentStatus EmploymentStatus  @default(ACTIVE) @map("员工状态")
-  accountStatus    AccountStatus     @default(ACTIVE) @map("账号状态")
-  canImport        Boolean           @default(false) @map("允许导入")
-  createdAt        DateTime          @default(now()) @map("创建时间")
-  updatedAt        DateTime          @updatedAt @map("更新时间")
-  sessions         LoginSession[]
-  favorites        ProductFavorite[]
+  id                 String              @id @default(cuid()) @map("用户ID") @db.VarChar(30)
+  username           String              @unique @map("登录账号") @db.VarChar(80)
+  passwordHash       String              @map("密码哈希") @db.VarChar(255)
+  name               String              @map("员工姓名") @db.VarChar(100)
+  employeeNo         String?             @unique @map("员工编号") @db.VarChar(80)
+  department         String?             @map("所属部门") @db.VarChar(120)
+  role               UserRole            @default(EMPLOYEE) @map("用户角色")
+  employmentStatus   EmploymentStatus    @default(ACTIVE) @map("员工状态")
+  accountStatus      AccountStatus       @default(ACTIVE) @map("账号状态")
+  canImport          Boolean             @default(false) @map("允许导入")
+  createdAt          DateTime            @default(now()) @map("创建时间")
+  updatedAt          DateTime            @updatedAt @map("更新时间")
+  sessions           LoginSession[]
+  favorites          ProductFavorite[]
+  dmpCredential      DmpCredential?
+  dmpAiRuns          DmpAiRun[]
+  dmpExtensionLink   DmpExtensionLink?
+  dmpCollectionTasks DmpCollectionTask[] @relation("DmpCollectionTaskCreator")
 
   @@index([role, accountStatus, employmentStatus])
   @@map("系统用户表")
@@ -242,4 +258,104 @@ model IpWhitelist {
   updatedAt DateTime @updatedAt @map("更新时间")
 
   @@map("公司IP白名单表")
+}
+
+model DmpCredential {
+  id               String    @id @default(cuid()) @map("授权ID") @db.VarChar(30)
+  userId           String    @unique @map("用户ID") @db.VarChar(30)
+  encryptedPayload String    @map("加密凭证") @db.Text
+  lastStatus       String    @default("NOT_TESTED") @map("最近验证状态") @db.VarChar(30)
+  lastCheckedAt    DateTime? @map("最近验证时间")
+  lastError        String?   @map("最近错误") @db.VarChar(300)
+  createdAt        DateTime  @default(now()) @map("创建时间")
+  updatedAt        DateTime  @updatedAt @map("更新时间")
+  user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("达摩盘授权表")
+}
+
+model DmpExtensionLink {
+  id                      String    @id @default(cuid()) @map("扩展绑定ID") @db.VarChar(30)
+  userId                  String    @unique @map("用户ID") @db.VarChar(30)
+  pairingCodeHash         String?   @unique @map("配对码哈希") @db.Char(64)
+  pairingExpiresAt        DateTime? @map("配对码过期时间")
+  extensionTokenHash      String?   @unique @map("扩展令牌哈希") @db.Char(64)
+  extensionTokenExpiresAt DateTime? @map("扩展令牌过期时间")
+  lastSeenAt              DateTime? @map("扩展最近在线时间")
+  lastSyncAt              DateTime? @map("最近同步时间")
+  lastStatus              String    @default("NOT_PAIRED") @map("扩展状态") @db.VarChar(30)
+  lastError               String?   @map("最近错误") @db.VarChar(300)
+  createdAt               DateTime  @default(now()) @map("创建时间")
+  updatedAt               DateTime  @updatedAt @map("更新时间")
+  user                    User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("达摩盘浏览器扩展绑定表")
+}
+
+model DmpAiRun {
+  id             String   @id @default(cuid()) @map("任务ID") @db.VarChar(30)
+  userId         String   @map("用户ID") @db.VarChar(30)
+  clientRunId    String   @map("客户端任务ID") @db.VarChar(100)
+  batchNumber    Int      @map("批次序号")
+  productIdsJson String   @map("商品ID列表") @db.Text
+  sessionId      String?  @map("达摩盘会话ID") @db.VarChar(120)
+  status         String   @default("CREATED") @map("任务状态") @db.VarChar(30)
+  markdown       String?  @map("AI返回Markdown") @db.Text
+  errorMessage   String?  @map("错误信息") @db.VarChar(500)
+  createdAt      DateTime @default(now()) @map("创建时间")
+  updatedAt      DateTime @updatedAt @map("更新时间")
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, clientRunId])
+  @@index([userId, createdAt])
+  @@map("达摩盘AI任务表")
+}
+
+model DmpCollectionTask {
+  id               String               @id @default(cuid()) @map("任务ID") @db.VarChar(30)
+  createdById      String               @map("创建管理员ID") @db.VarChar(30)
+  title            String               @map("任务名称") @db.VarChar(255)
+  status           String               @default("QUEUED") @map("任务状态") @db.VarChar(30)
+  productIdsJson   String               @map("商品ID列表") @db.Text
+  totalProducts    Int                  @default(0) @map("商品总数")
+  totalBatches     Int                  @default(0) @map("批次总数")
+  completedBatches Int                  @default(0) @map("完成批次数")
+  failedBatches    Int                  @default(0) @map("失败批次数")
+  savedProducts    Int                  @default(0) @map("已入库商品数")
+  lastError        String?              @map("最近错误") @db.Text
+  createdAt        DateTime             @default(now()) @map("创建时间")
+  startedAt        DateTime?            @map("开始时间")
+  completedAt      DateTime?            @map("完成时间")
+  updatedAt        DateTime             @updatedAt @map("更新时间")
+  createdBy        User                 @relation("DmpCollectionTaskCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  batches          DmpCollectionBatch[]
+
+  @@index([status, createdAt])
+  @@index([createdById, createdAt])
+  @@map("达摩盘采集任务表")
+}
+
+model DmpCollectionBatch {
+  id                       String            @id @default(cuid()) @map("批次ID") @db.VarChar(30)
+  taskId                   String            @map("任务ID") @db.VarChar(30)
+  batchNumber              Int               @map("批次序号")
+  productIdsJson           String            @map("商品ID列表") @db.Text
+  clientRunId              String            @unique @map("客户端任务ID") @db.VarChar(100)
+  previousClientRunIdsJson String            @default("[]") @map("历史客户端任务ID") @db.Text
+  status                   String            @default("QUEUED") @map("批次状态") @db.VarChar(30)
+  attempts                 Int               @default(0) @map("执行次数")
+  recoveryCount            Int               @default(0) @map("恢复查询次数")
+  savedProducts            Int               @default(0) @map("已入库商品数")
+  nextAttemptAt            DateTime          @default(now()) @map("下次执行时间")
+  lastError                String?           @map("最近错误") @db.Text
+  startedAt                DateTime?         @map("开始时间")
+  completedAt              DateTime?         @map("完成时间")
+  createdAt                DateTime          @default(now()) @map("创建时间")
+  updatedAt                DateTime          @updatedAt @map("更新时间")
+  task                     DmpCollectionTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@unique([taskId, batchNumber])
+  @@index([status, nextAttemptAt])
+  @@index([taskId, status])
+  @@map("达摩盘采集批次表")
 }

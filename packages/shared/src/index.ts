@@ -42,6 +42,16 @@ export interface ProductListItem {
   buyer: MetricRange;
   cart: MetricRange;
   buyerTrend: Array<{ weekStart: string; median: number | null }>;
+  aiPreviousSales: string | null;
+  aiSales: string | null;
+  aiClickRate: string | null;
+  aiConversionRate: string | null;
+  aiAddToCartRate: string | null;
+  aiAddToCartCost: string | null;
+  aiRoi: string | null;
+  aiUnitPrice: string | null;
+  aiSpend: string | null;
+  aiCpc: string | null;
 }
 
 export interface ProductHistoryItem {

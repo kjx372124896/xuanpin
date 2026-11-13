@@ -32,6 +32,8 @@ services:
       ADMIN_USERNAME: ${ADMIN_USERNAME}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD}
       ADMIN_NAME: ${ADMIN_NAME}
+      DMP_CREDENTIAL_ENCRYPTION_KEY: ${DMP_CREDENTIAL_ENCRYPTION_KEY}
+      DMP_EXTENSION_ID: ${DMP_EXTENSION_ID:-nggbkgocgdebofoppmjjfoobhblppicf}
     volumes:
       - selection_uploads:/app/apps/api/storage/uploads
     depends_on:

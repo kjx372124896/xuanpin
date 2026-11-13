@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>达摩盘登录助手</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <main class="panel">
+      <header class="header">
+        <div class="logo">选</div>
+        <div>
+          <h1>达摩盘登录助手</h1>
+          <p>选品工具配套扩展</p>
+        </div>
+      </header>
+
+      <section class="status-card">
+        <div class="status-line"><span id="statusDot" class="dot"></span><strong id="statusTitle">正在读取状态…</strong></div>
+        <p id="statusDescription">扩展只自动同步达摩盘登录态，不会读取或展示 Cookie 明文。</p>
+        <small id="lastSync"></small>
+      </section>
+
+      <section id="pairSection" class="section">
+        <label for="pairCode">选品工具配对码</label>
+        <input id="pairCode" maxlength="12" autocomplete="one-time-code" placeholder="输入授权页生成的12位配对码" />
+        <p class="hint">先在选品工具「达摩盘授权」页面生成配对码，再在当前选品工具标签页打开本扩展。</p>
+        <button id="pairButton" class="primary" disabled>绑定当前选品工具</button>
+      </section>
+
+      <section id="pairedSection" class="section hidden">
+        <div class="account-line"><span>已绑定账号</span><strong id="userName">—</strong></div>
+        <button id="openDmpButton" class="primary">打开达摩盘并自动同步</button>
+        <button id="refreshButton" class="secondary">刷新授权状态</button>
+        <p class="hint">请在达摩盘页面正常登录。登录成功后，扩展会自动获取必要 Cookie 并加密同步到选品工具。</p>
+      </section>
+
+      <div id="message" class="message hidden" role="status"></div>
+      <footer>Cookie 仅在扩展后台短暂处理，并通过授权 API 加密传输；不会写入扩展存储或日志。</footer>
+    </main>
+    <script src="popup.js"></script>
+  </body>
+</html>

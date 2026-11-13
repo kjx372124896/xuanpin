@@ -12,8 +12,10 @@ async function bootstrap() {
   const app = await NestFactory.create(AppModule);
   app.setGlobalPrefix("api");
   app.use(cookieParser());
+  const webOrigins = new Set((process.env.WEB_ORIGIN ?? "http://localhost:5173").split(",").map((value) => value.trim()).filter(Boolean));
+  const extensionOrigin = process.env.DMP_EXTENSION_ID ? `chrome-extension://${process.env.DMP_EXTENSION_ID}` : "";
   app.enableCors({
-    origin: (process.env.WEB_ORIGIN ?? "http://localhost:5173").split(","),
+    origin: (origin: string | undefined, callback: (error: Error | null, allowed?: boolean) => void) => callback(null, !origin || webOrigins.has(origin) || origin === extensionOrigin),
     credentials: true,
   });
   const trustProxy = process.env.TRUST_PROXY ?? "0";

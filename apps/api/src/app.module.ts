@@ -7,9 +7,10 @@ import { ImportsModule } from "./imports/imports.module";
 import { HealthController } from "./health.controller";
 import { PrismaModule } from "./prisma/prisma.module";
 import { ProductsModule } from "./products/products.module";
+import { DmpModule } from "./dmp/dmp.module";
 
 @Module({
-  imports: [PrismaModule, AuthModule, AdminModule, ProductsModule, ImportsModule],
+  imports: [PrismaModule, AuthModule, AdminModule, ProductsModule, ImportsModule, DmpModule],
   controllers: [HealthController],
   providers: [{ provide: APP_GUARD, useExisting: AuthGuard }],
 })
