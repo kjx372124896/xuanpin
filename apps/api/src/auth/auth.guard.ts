@@ -5,6 +5,7 @@ import { PrismaService } from "../prisma/prisma.service";
 import { IMPORT_KEY, PUBLIC_KEY, ROLES_KEY } from "./auth.decorators";
 import { IpService } from "./ip.service";
 import { toSafeUser, type AuthenticatedRequest } from "./request-user";
+import { normalizeClientIp } from "./client-ip";
 
 @Injectable()
 export class AuthGuard implements CanActivate {
@@ -32,7 +33,7 @@ export class AuthGuard implements CanActivate {
     if (user.accountStatus !== "ACTIVE" || user.employmentStatus !== "ACTIVE") {
       throw new UnauthorizedException("账号已停用或员工状态不是在职，请联系管理员。");
     }
-    if (user.role === "EMPLOYEE") await this.ipService.assertEmployeeIp(request.ip ?? request.socket.remoteAddress);
+    if (user.role === "EMPLOYEE") await this.ipService.assertEmployeeIp(normalizeClientIp(request.ip ?? request.socket.remoteAddress));
 
     const requiredRoles = this.reflector.getAllAndOverride<string[]>(ROLES_KEY, [context.getHandler(), context.getClass()]);
     if (requiredRoles?.length && !requiredRoles.includes(user.role)) throw new ForbiddenException("没有权限访问此功能。");

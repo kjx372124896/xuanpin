@@ -4,6 +4,7 @@ import { IsString, MinLength } from "class-validator";
 import { Public } from "./auth.decorators";
 import { AuthService } from "./auth.service";
 import type { AuthenticatedRequest } from "./request-user";
+import { normalizeClientIp } from "./client-ip";
 
 class LoginDto {
   @IsString() username!: string;
@@ -15,9 +16,15 @@ export class AuthController {
   constructor(private readonly authService: AuthService) {}
 
   @Public()
+  @Get("client-ip")
+  clientIp(@Req() req: Request) {
+    return { ip: normalizeClientIp(req.ip ?? req.socket.remoteAddress) ?? null };
+  }
+
+  @Public()
   @Post("login")
   async login(@Body() dto: LoginDto, @Req() req: Request, @Res({ passthrough: true }) res: Response) {
-    const result = await this.authService.login(dto.username, dto.password, req.ip ?? req.socket.remoteAddress);
+    const result = await this.authService.login(dto.username, dto.password, normalizeClientIp(req.ip ?? req.socket.remoteAddress));
     res.cookie("sid", result.token, {
       httpOnly: true,
       secure: process.env.COOKIE_SECURE === "true",

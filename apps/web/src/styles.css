@@ -101,6 +101,11 @@ a { color: #315efb; }
 .login-card-heading h3.ant-typography { margin-bottom: 7px; color: #26334b; }
 .login-card .ant-form-item-label label { color: #526078; font-size: 12px; font-weight: 600; }
 .login-submit { height: 46px; margin-top: 6px; font-weight: 600; }
+.login-ip-panel { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; margin-top: 18px; padding: 12px 13px; border: 1px solid #e7edf7; border-radius: 10px; background: #f8faff; }
+.login-ip-main { flex: 1 1 180px; min-width: 0; }
+.login-ip-label { margin-bottom: 4px; color: #8b97aa; font-size: 10px; }
+.login-ip-value { color: #2f4770; font-size: 13px; font-weight: 650; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.login-ip-hint { flex: 1 1 100%; color: #929daf; font-size: 10px; line-height: 1.5; }
 .login-card-foot { border-top: 1px solid #f0f2f6; padding-top: 17px; margin-top: 22px; text-align: center; color: #a0a9b8; font-size: 11px; }
 .login-decoration { position: absolute; border-radius: 50%; filter: blur(1px); pointer-events: none; }
 .login-decoration-one { width: 520px; height: 520px; left: -260px; bottom: -300px; border: 1px solid rgba(255,255,255,.07); box-shadow: 0 0 0 50px rgba(255,255,255,.025),0 0 0 100px rgba(255,255,255,.018); }

@@ -1,14 +1,36 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Button, Card, Form, Input, Typography, message } from "antd";
-import { DatabaseOutlined, LockOutlined, UserOutlined } from "@ant-design/icons";
+import { CopyOutlined, DatabaseOutlined, LockOutlined, UserOutlined } from "@ant-design/icons";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
-import { errorMessage } from "../api";
+import { api, errorMessage } from "../api";
 
 export function LoginPage() {
   const [busy, setBusy] = useState(false);
+  const [clientIp, setClientIp] = useState<string | null>(null);
+  const [ipLoading, setIpLoading] = useState(true);
   const { login } = useAuth();
   const navigate = useNavigate();
+
+  useEffect(() => {
+    const controller = new AbortController();
+    api.get<{ ip: string | null }>("/auth/client-ip", { signal: controller.signal })
+      .then(({ data }) => setClientIp(data.ip))
+      .catch(() => { if (!controller.signal.aborted) setClientIp(null); })
+      .finally(() => { if (!controller.signal.aborted) setIpLoading(false); });
+    return () => controller.abort();
+  }, []);
+
+  async function copyClientIp() {
+    if (!clientIp) return;
+    try {
+      if (!navigator.clipboard?.writeText) throw new Error("Clipboard API unavailable");
+      await navigator.clipboard.writeText(clientIp);
+      message.success("IP 已复制，请发送给管理员添加白名单。");
+    } catch {
+      message.error("复制失败，请手动选中 IP 复制。");
+    }
+  }
 
   async function submit(values: { username: string; password: string }) {
     setBusy(true);
@@ -38,6 +60,14 @@ export function LoginPage() {
             <Form.Item label="登录密码" name="password" rules={[{ required: true, message: "请输入登录密码" }]}><Input.Password prefix={<LockOutlined />} placeholder="请输入密码" autoComplete="current-password" /></Form.Item>
             <Button type="primary" htmlType="submit" block loading={busy} className="login-submit">登录工作台</Button>
           </Form>
+          <div className="login-ip-panel">
+            <div className="login-ip-main">
+              <div className="login-ip-label">当前网络 IP</div>
+              <Typography.Text className="login-ip-value">{ipLoading ? "正在获取…" : clientIp ?? "暂时无法获取"}</Typography.Text>
+            </div>
+            <Button size="small" icon={<CopyOutlined />} onClick={() => void copyClientIp()} disabled={!clientIp}>复制 IP</Button>
+            <div className="login-ip-hint">如提示 IP 不在白名单，请复制此地址发送给管理员添加。</div>
+          </div>
           <div className="login-card-foot">账号由系统管理员创建，如无法登录请联系管理员。</div>
         </Card>
       </div>

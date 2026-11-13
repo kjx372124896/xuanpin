@@ -8,7 +8,7 @@
     "start": "node dist/main.js",
     "typecheck": "tsc -p tsconfig.build.json --noEmit",
     "seed": "tsx src/seed.ts",
-    "test": "tsx --test src/imports/metric-parser.test.ts src/products/ai-metrics-parser.test.ts src/products/ai-metrics-status.test.ts src/dmp/dmp.helpers.test.ts"
+    "test": "tsx --test src/imports/metric-parser.test.ts src/products/ai-metrics-parser.test.ts src/products/ai-metrics-status.test.ts src/dmp/dmp.helpers.test.ts src/auth/client-ip.test.ts"
   },
   "dependencies": {
     "@nestjs/common": "11.2.9",
