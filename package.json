@@ -14,7 +14,9 @@
     "db:deploy": "pnpm exec prisma migrate deploy --schema prisma/schema.prisma",
     "db:seed": "pnpm --filter @selection/api seed",
     "db:studio": "pnpm exec prisma studio --schema prisma/schema.prisma",
-    "test:parser": "pnpm --filter @selection/api test"
+    "test:parser": "pnpm --filter @selection/api test",
+    "deploy:linux": "node scripts/deploy-linux.mjs",
+    "update:linux": "node scripts/deploy-linux.mjs --update"
   },
   "devDependencies": {
     "@prisma/client": "6.19.3",

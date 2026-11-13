@@ -20,6 +20,7 @@
     "class-validator": "^0.14.2",
     "cookie-parser": "^1.4.7",
     "dotenv": "^17.2.3",
+    "express": "5.2.1",
     "exceljs": "4.4.0",
     "fflate": "^0.8.3",
     "ipaddr.js": "^2.2.0",
