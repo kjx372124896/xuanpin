@@ -9,6 +9,7 @@ import { ProductsPage } from "./pages/ProductsPage";
 const AdminPage = lazy(() => import("./pages/AdminPage").then((module) => ({ default: module.AdminPage })));
 const ImportPage = lazy(() => import("./pages/ImportPage").then((module) => ({ default: module.ImportPage })));
 const DmpAuthPage = lazy(() => import("./pages/DmpAuthPage").then((module) => ({ default: module.DmpAuthPage })));
+const CategoriesPage = lazy(() => import("./pages/CategoriesPage").then((module) => ({ default: module.CategoriesPage })));
 
 function RequireAuth() {
   const { user, loading } = useAuth();
@@ -36,6 +37,7 @@ export function App() {
       <Route element={<RequireAuth />}>
         <Route element={<AppLayout />}>
           <Route index element={<ProductsPage />} />
+          <Route path="categories" element={<Suspense fallback={<div className="loading-screen"><Spin /></div>}><CategoriesPage /></Suspense>} />
           <Route path="dmp-auth" element={<RequireAdmin><Suspense fallback={<div className="loading-screen"><Spin /></div>}><DmpAuthPage /></Suspense></RequireAdmin>} />
           <Route path="imports" element={<Suspense fallback={<div className="loading-screen"><Spin /></div>}><RequireImporter /></Suspense>} />
           <Route path="admin" element={<RequireAdmin><Suspense fallback={<div className="loading-screen"><Spin /></div>}><AdminPage /></Suspense></RequireAdmin>} />

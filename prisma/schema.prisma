@@ -142,15 +142,18 @@ model ProductHistory {
 }
 
 model Category {
-  id             String   @id @default(cuid()) @map("类目ID") @db.VarChar(30)
-  categoryName   String   @unique @map("类目名称") @db.VarChar(255)
-  categoryLevel1 String   @map("一级类目") @db.VarChar(255)
-  categoryLevel2 String?  @map("二级类目") @db.VarChar(255)
-  enabled        Boolean  @default(true) @map("是否启用")
-  createdAt      DateTime @default(now()) @map("创建时间")
-  updatedAt      DateTime @updatedAt @map("更新时间")
+  id                 String   @id @default(cuid()) @map("类目ID") @db.VarChar(30)
+  categoryName       String   @unique @map("类目名称") @db.VarChar(255)
+  categoryLevel1     String   @map("一级类目") @db.VarChar(255)
+  categoryLevel2     String?  @map("二级类目") @db.VarChar(255)
+  responsibleUserId  String?  @map("负责人ID") @db.VarChar(30)
+  enabled            Boolean  @default(true) @map("是否启用")
+  createdAt          DateTime @default(now()) @map("创建时间")
+  updatedAt          DateTime @updatedAt @map("更新时间")
+  responsibleUser    User?    @relation("CategoryResponsibleUser", fields: [responsibleUserId], references: [id], onDelete: SetNull)
 
   @@index([categoryLevel1, categoryLevel2])
+  @@index([responsibleUserId])
   @@map("类目表")
 }
 
@@ -220,6 +223,7 @@ model User {
   dmpAiRuns          DmpAiRun[]
   dmpExtensionLink   DmpExtensionLink?
   dmpCollectionTasks DmpCollectionTask[] @relation("DmpCollectionTaskCreator")
+  assignedCategories Category[]          @relation("CategoryResponsibleUser")
 
   @@index([role, accountStatus, employmentStatus])
   @@map("系统用户表")

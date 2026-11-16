@@ -33,36 +33,109 @@ interface ProductTableRow extends ProductListItem {
 }
 const ProductDetailModal = lazy(() => import("./ProductDetailPage").then((module) => ({ default: module.ProductDetailModal })));
 
-function dateText(value: string | null) { return value ? dayjs(value).format("YYYY-MM-DD") : "—"; }
 function numberText(value: number | null | undefined) {
   return value === null || value === undefined ? "—" : value.toLocaleString("zh-CN", { maximumFractionDigits: 1 });
 }
 
-function MetricSummary({ metric }: { metric: ProductListItem["buyer"] }) {
-  return <div className="metric-summary" title={metric.raw ?? undefined}><span>最小：{numberText(metric.min)}</span><span>最大：{numberText(metric.max)}</span><strong>中值：{numberText(metric.median)}</strong></div>;
-}
-
 function BuyerTrend({ points }: { points: ProductListItem["buyerTrend"] }) {
-  const valid = points.map((point, index) => ({ index, median: point.median })).filter((point): point is { index: number; median: number } => point.median !== null && Number.isFinite(point.median));
-  if (!valid.length) return <Typography.Text type="secondary">暂无趋势</Typography.Text>;
-  const values = valid.map((point) => point.median);
-  const min = Math.min(...values);
-  const max = Math.max(...values);
-  const span = max - min || 1;
-  const coordinates = valid.map((point) => {
-    const x = points.length === 1 ? 145 : 5 + (point.index / (points.length - 1)) * 140;
-    const y = 34 - ((point.median - min) / span) * 27;
-    return { x, y };
+  const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
+  const validPoints = points.filter((point) => point.median !== null || point.min !== null || point.max !== null);
+  if (!validPoints.length) return <Typography.Text type="secondary">暂无趋势</Typography.Text>;
+
+  const lowerValues = validPoints.map((point) => point.min ?? point.median ?? point.max ?? 0);
+  const upperValues = validPoints.map((point, index) => Math.max(lowerValues[index], point.max ?? point.median ?? lowerValues[index]));
+  const chartWidth = 330;
+  const chartHeight = 158;
+  const plot = { left: 31, right: 8, top: 9, bottom: 27 };
+  const plotWidth = chartWidth - plot.left - plot.right;
+  const plotHeight = chartHeight - plot.top - plot.bottom;
+  const maxValue = Math.max(1, ...upperValues, ...validPoints.map((point) => point.median ?? 0));
+  const axisMax = Math.max(4, Math.ceil(maxValue / 4) * 4);
+  const yFor = (value: number) => plot.top + plotHeight - (Math.max(0, value) / axisMax) * plotHeight;
+  const chartPoints = validPoints.map((point, index) => {
+    const lower = lowerValues[index];
+    const upper = upperValues[index];
+    const medianY = point.median === null ? null : yFor(point.median);
+    return {
+      point,
+      x: validPoints.length === 1 ? plot.left + plotWidth / 2 : plot.left + (index / (validPoints.length - 1)) * plotWidth,
+      y: medianY ?? yFor((lower + upper) / 2),
+      lowerY: yFor(lower),
+      upperY: yFor(upper),
+      medianY,
+    };
   });
-  const polyline = coordinates.map((point) => point.x + "," + point.y).join(" ");
-  const last = coordinates[coordinates.length - 1];
+  const bandPoints = [
+    ...chartPoints.map((point) => `${point.x},${point.upperY}`),
+    ...chartPoints.slice().reverse().map((point) => `${point.x},${point.lowerY}`),
+  ].join(" ");
+  let medianPath = "";
+  let hasPreviousMedian = false;
+  chartPoints.forEach((point) => {
+    if (point.medianY === null) {
+      hasPreviousMedian = false;
+      return;
+    }
+    medianPath += `${hasPreviousMedian ? "L" : "M"} ${point.x} ${point.medianY} `;
+    hasPreviousMedian = true;
+  });
+  const labelStep = Math.max(1, Math.ceil((validPoints.length - 1) / 5));
+  const labelIndices = validPoints.map((_, index) => index).filter((index) => index === 0 || index === validPoints.length - 1 || index % labelStep === 0);
+  const hoveredPoint = hoveredIndex === null ? null : chartPoints[hoveredIndex];
+  const tooltipLeft = hoveredPoint
+    ? Math.max(2, Math.min(hoveredPoint.x > chartWidth * 0.62 ? hoveredPoint.x - 174 : hoveredPoint.x + 10, chartWidth - 174))
+    : 0;
+  const tooltipTop = hoveredPoint
+    ? Math.max(2, Math.min(hoveredPoint.y > chartHeight * 0.62 ? hoveredPoint.y - 88 : hoveredPoint.y + 10, chartHeight - 88))
+    : 0;
   return (
-    <div className="buyer-trend-cell">
-      <svg viewBox="0 0 150 40" role="img" aria-label={"支付买家数中值趋势：" + numberText(values[0]) + " 到 " + numberText(values[values.length - 1])}>
-        <polyline points={polyline} fill="none" stroke="#315efb" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
-        <circle cx={last.x} cy={last.y} r="3" fill="#315efb" />
-      </svg>
-      <span>{numberText(valid[0].median)} → {numberText(valid[valid.length - 1].median)}</span>
+    <div className="buyer-trend-cell" role="group" aria-label="支付买家数趋势，包含中值折线和最小值至最大值区间范围">
+      <div className="buyer-trend-legend">
+        <span><i className="buyer-trend-legend-range" />区间范围</span>
+        <span><i className="buyer-trend-legend-median" />中值</span>
+      </div>
+      <div className="buyer-trend-chart-wrap">
+        <svg className="buyer-trend-chart" viewBox={`0 0 ${chartWidth} ${chartHeight}`} role="img" aria-label="按周展示支付买家数中值及区间范围">
+          {[0, 1, 2, 3, 4].map((step) => {
+            const value = axisMax * step / 4;
+            const y = yFor(value);
+            return <g key={step}><line x1={plot.left} y1={y} x2={chartWidth - plot.right} y2={y} stroke="#e9edf5" strokeDasharray="3 3" /><text x={plot.left - 7} y={y + 3} fill="#8792a8" fontSize="9" textAnchor="end">{numberText(value)}</text></g>;
+          })}
+          <line x1={plot.left} y1={plot.top + plotHeight} x2={chartWidth - plot.right} y2={plot.top + plotHeight} stroke="#d9deea" />
+          <polygon points={bandPoints} fill="rgba(168, 204, 53, 0.18)" />
+          {hoveredPoint && <line x1={hoveredPoint.x} y1={plot.top} x2={hoveredPoint.x} y2={plot.top + plotHeight} stroke="#aeb7c8" strokeDasharray="3 3" />}
+          <path d={medianPath} fill="none" stroke="#595c83" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
+          {chartPoints.map((point, index) => (
+            <g
+              key={`${point.point.weekStart}-${index}`}
+              tabIndex={0}
+              role="button"
+              aria-label={`${dayjs(point.point.weekStart).format("YYYY-MM-DD")}，支付买家数中值 ${numberText(point.point.median)}`}
+              onMouseEnter={() => setHoveredIndex(index)}
+              onMouseLeave={() => setHoveredIndex(null)}
+              onFocus={() => setHoveredIndex(index)}
+              onBlur={() => setHoveredIndex(null)}
+              style={{ cursor: "crosshair", outline: "none" }}
+            >
+              {point.medianY !== null && <circle cx={point.x} cy={point.medianY} r="3.3" fill="#595c83" stroke="#fff" strokeWidth="1.2" />}
+              <circle cx={point.x} cy={point.y} r="9" fill="transparent"><title>{`${dayjs(point.point.weekStart).format("YYYY-MM-DD")}：${numberText(point.point.median)}`}</title></circle>
+            </g>
+          ))}
+          {labelIndices.map((index) => {
+            const point = chartPoints[index];
+            return <text key={index} x={point.x} y={chartHeight - 6} fill="#8792a8" fontSize="9" textAnchor={index === 0 ? "start" : index === chartPoints.length - 1 ? "end" : "middle"}>{dayjs(point.point.weekStart).format("MM/DD")}</text>;
+          })}
+        </svg>
+        {hoveredPoint && (
+          <div className="buyer-trend-tooltip" style={{ left: tooltipLeft, top: tooltipTop }}>
+            <strong>{dayjs(hoveredPoint.point.weekStart).format("YYYY-MM-DD")} 至 {dayjs(hoveredPoint.point.weekEnd).format("MM-DD")}</strong>
+            <span>原始值：{hoveredPoint.point.raw ?? "—"}</span>
+            <span>最小值：{numberText(hoveredPoint.point.min)}</span>
+            <span>最大值：{numberText(hoveredPoint.point.max)}</span>
+            <span>中值：{numberText(hoveredPoint.point.median)}</span>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -94,12 +167,12 @@ export function ProductsPage() {
     latestWeekStarts: filters.latestWeekStarts?.join(",") || undefined,
   }), [page, pageSize, filters]);
   const productsQuery = useQuery({
-    queryKey: ["products", params],
+    queryKey: ["products", "buyer-trend-v2", params],
     queryFn: async () => (await api.get<Paginated<ProductListItem>>("/products", { params })).data,
   });
   const teamParams = useMemo(() => ({ ...params, favoritesOnly: undefined, memberKeyword: memberKeyword.trim() || undefined }), [params, memberKeyword]);
   const teamFavoritesQuery = useQuery({
-    queryKey: ["team-favorites", teamParams],
+    queryKey: ["team-favorites", "buyer-trend-v2", teamParams],
     queryFn: async () => (await api.get<Paginated<TeamFavoriteProduct>>("/products/team-favorites", { params: teamParams })).data,
     enabled: isAdmin && teamFavoritesMode,
   });
@@ -121,7 +194,7 @@ export function ProductsPage() {
 
   const columns: ColumnsType<ProductTableRow> = [
     {
-      title: "商品", dataIndex: "productName", key: "productName", width: 240,
+      title: "商品", dataIndex: "productName", key: "productName", width: 230, fixed: "left",
       render: (_value, item) => (
         <div className="product-cell">
           <Image
@@ -132,10 +205,18 @@ export function ProductsPage() {
             fallback="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='72' height='72'%3E%3Crect width='100%25' height='100%25' fill='%23edf1f7'/%3E%3C/svg%3E"
           />
           <div className="product-cell-copy">
+            <div className="product-category">{[item.latestCategoryLevel1, item.latestCategoryLevel2].filter(Boolean).join(" / ") || "未分类"}</div>
             <Button type="link" className="product-name-link" onClick={() => setSelectedProductId(item.productId)}>{item.productName}</Button>
             <div className="product-meta-row">
               <Typography.Text type="secondary" className="product-id">ID：{item.productId}</Typography.Text>
               <Button type="link" size="small" icon={<LinkOutlined />} disabled={!item.productUrl} className="open-product-link" onClick={() => openProductUrl(item.productUrl)}>打开链接</Button>
+            </div>
+            <div className="product-shop-row">
+              <Typography.Text type="secondary" className="product-shop-name">店铺：{item.shopName || "—"}{item.shopType ? ` · ${item.shopType}` : ""}</Typography.Text>
+            </div>
+            <div className="product-count-row">
+              <span>上榜周数：<strong>{item.historyWeekCount} 周</strong></span>
+              <span>连续上榜：<strong>{item.consecutiveWeekCount} 周</strong></span>
             </div>
           </div>
         </div>
@@ -160,14 +241,7 @@ export function ProductsPage() {
         </Tooltip>
       ),
     },
-    { title: "一级 / 二级类目", key: "category", width: 145, render: (_value, item) => <div><div>{item.latestCategoryLevel1 || "—"}</div><Typography.Text type="secondary" className="table-subtext">{item.latestCategoryLevel2 || "无二级类目"}</Typography.Text></div> },
-    { title: "店铺", dataIndex: "shopName", key: "shop", width: 120, render: (value, item) => <div><div>{value || "—"}</div><Typography.Text type="secondary" className="table-subtext">{item.shopType || ""}</Typography.Text></div> },
-    { title: "最新支付买家数", key: "buyer", width: 125, render: (_value, item) => <MetricSummary metric={item.buyer} /> },
-    { title: "趋势", key: "buyerTrend", width: 185, render: (_value, item) => <BuyerTrend points={item.buyerTrend} /> },
-    { title: "最新访客数", key: "visitor", width: 125, render: (_value, item) => <MetricSummary metric={item.visitor} /> },
-    { title: "上榜周数", dataIndex: "historyWeekCount", key: "weeks", width: 80, align: "center" },
-    { title: "连续周数", dataIndex: "consecutiveWeekCount", key: "streak", width: 80, align: "center", render: (value) => <span className={value >= 4 ? "streak-strong" : ""}>{value}</span> },
-    { title: "最近周期起止日期", key: "latestPeriod", width: 155, render: (_value, item) => <div className="date-range-cell"><span>开始：{dateText(item.latestWeekStart)}</span><span>结束：{dateText(item.latestWeekEnd)}</span></div> },
+    { title: "趋势", key: "buyerTrend", width: 360, render: (_value, item) => <BuyerTrend points={item.buyerTrend} /> },
     { title: "上期销售额", dataIndex: "aiPreviousSales", key: "aiPreviousSales", width: 112, render: (value: string | null) => <span className="ai-metric-cell" title={value || undefined}>{value || "—"}</span> },
     { title: "销售额", dataIndex: "aiSales", key: "aiSales", width: 112, render: (value: string | null) => <span className="ai-metric-cell" title={value || undefined}>{value || "—"}</span> },
     { title: "点击率", dataIndex: "aiClickRate", key: "aiClickRate", width: 105, render: (value: string | null) => <span className="ai-metric-cell" title={value || undefined}>{value || "—"}</span> },
@@ -233,7 +307,7 @@ export function ProductsPage() {
         <div>
           <div className="eyebrow">PRODUCT OVERVIEW</div>
           <Typography.Title level={2}>商品选品</Typography.Title>
-          <Typography.Text type="secondary">按商品 ID 汇总榜单记录，查看支付买家数与访客数变化趋势。</Typography.Text>
+          <Typography.Text type="secondary">按商品 ID 汇总榜单记录，查看支付买家数变化趋势。</Typography.Text>
         </div>
         <Button icon={<ReloadOutlined />} onClick={() => void activeQuery.refetch()}>刷新数据</Button>
       </div>
@@ -361,12 +435,13 @@ export function ProductsPage() {
             columns={columns}
             dataSource={data?.items ?? []}
             rowSelection={isAdmin ? {
+              fixed: true,
               selectedRowKeys: selectedProductIds,
               preserveSelectedRowKeys: true,
               onChange: (keys) => setSelectedProductIds(keys.map(String)),
             } : undefined}
             loading={activeQuery.isLoading || activeQuery.isFetching}
-            scroll={{ x: 2600, y: "calc(100vh - 390px)" }}
+            scroll={{ x: teamFavoritesMode && isAdmin ? 1950 : 1800, y: "calc(100vh - 390px)" }}
             size="middle"
             locale={{ emptyText: <Empty description="暂无商品数据，请先导入生意参谋 Excel 榜单" /> }}
             pagination={false}

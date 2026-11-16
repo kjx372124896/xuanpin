@@ -117,7 +117,7 @@ export class ProductsService {
       productIds.length
         ? this.prisma.productHistory.findMany({
         where: { productId: { in: productIds } },
-        select: { productId: true, weekStart: true, buyerMedian: true, exportTime: true, categoryName: true },
+        select: { productId: true, weekStart: true, weekEnd: true, buyerRaw: true, buyerMin: true, buyerMax: true, buyerMedian: true, exportTime: true, categoryName: true },
       })
         : [],
       productIds.length
@@ -132,7 +132,7 @@ export class ProductsService {
       || a.weekStart.getTime() - b.weekStart.getTime()
       || (b.exportTime?.getTime() ?? 0) - (a.exportTime?.getTime() ?? 0)
       || a.categoryName.localeCompare(b.categoryName));
-    const trendByProduct = new Map<string, Array<{ weekStart: string; median: number | null }>>();
+    const trendByProduct = new Map<string, Array<{ weekStart: string; weekEnd: string; raw: string | null; min: number | null; max: number | null; median: number | null }>>();
     const seenProductWeeks = new Set<string>();
     for (const row of historyRows) {
       const weekKey = `${row.productId}|${row.weekStart.toISOString().slice(0, 10)}`;
@@ -141,13 +141,17 @@ export class ProductsService {
       const trend = trendByProduct.get(row.productId) ?? [];
       trend.push({
         weekStart: row.weekStart.toISOString(),
+        weekEnd: row.weekEnd.toISOString(),
+        raw: row.buyerRaw,
+        min: row.buyerMin === null ? null : Number(row.buyerMin),
+        max: row.buyerMax === null ? null : Number(row.buyerMax),
         median: row.buyerMedian === null ? null : Number(row.buyerMedian),
       });
       trendByProduct.set(row.productId, trend);
     }
 
     return {
-      items: items.map((item) => ({ ...mapProduct(item), isFavorited: favoriteIds.has(item.productId), buyerTrend: trendByProduct.get(item.productId) ?? [] })),
+      items: items.map((item) => ({ ...mapProduct(item), isFavorited: favoriteIds.has(item.productId), buyerTrend: (trendByProduct.get(item.productId) ?? []).slice(-12) })),
       page,
       pageSize,
       total,
@@ -227,7 +231,7 @@ export class ProductsService {
     const [historyRows, adminFavorites] = await Promise.all([
       productIds.length ? this.prisma.productHistory.findMany({
         where: { productId: { in: productIds } },
-        select: { productId: true, weekStart: true, buyerMedian: true, exportTime: true, categoryName: true },
+        select: { productId: true, weekStart: true, weekEnd: true, buyerRaw: true, buyerMin: true, buyerMax: true, buyerMedian: true, exportTime: true, categoryName: true },
       }) : [],
       productIds.length ? this.prisma.productFavorite.findMany({
         where: { userId: query.adminUserId, productId: { in: productIds } },
@@ -238,14 +242,21 @@ export class ProductsService {
       || a.weekStart.getTime() - b.weekStart.getTime()
       || (b.exportTime?.getTime() ?? 0) - (a.exportTime?.getTime() ?? 0)
       || a.categoryName.localeCompare(b.categoryName));
-    const trendByProduct = new Map<string, Array<{ weekStart: string; median: number | null }>>();
+    const trendByProduct = new Map<string, Array<{ weekStart: string; weekEnd: string; raw: string | null; min: number | null; max: number | null; median: number | null }>>();
     const seenProductWeeks = new Set<string>();
     for (const row of historyRows) {
       const weekKey = `${row.productId}|${row.weekStart.toISOString().slice(0, 10)}`;
       if (seenProductWeeks.has(weekKey)) continue;
       seenProductWeeks.add(weekKey);
       const trend = trendByProduct.get(row.productId) ?? [];
-      trend.push({ weekStart: row.weekStart.toISOString(), median: row.buyerMedian === null ? null : Number(row.buyerMedian) });
+      trend.push({
+        weekStart: row.weekStart.toISOString(),
+        weekEnd: row.weekEnd.toISOString(),
+        raw: row.buyerRaw,
+        min: row.buyerMin === null ? null : Number(row.buyerMin),
+        max: row.buyerMax === null ? null : Number(row.buyerMax),
+        median: row.buyerMedian === null ? null : Number(row.buyerMedian),
+      });
       trendByProduct.set(row.productId, trend);
     }
     const adminFavoriteIds = new Set(adminFavorites.map((row) => row.productId));
@@ -253,7 +264,7 @@ export class ProductsService {
       items: items.map((item) => ({
         ...mapProduct(item),
         isFavorited: adminFavoriteIds.has(item.productId),
-        buyerTrend: trendByProduct.get(item.productId) ?? [],
+        buyerTrend: (trendByProduct.get(item.productId) ?? []).slice(-12),
         favoriteCount: item.favorites.length,
         favoriteUsers: item.favorites.map((favorite) => ({
           userId: favorite.user.id,

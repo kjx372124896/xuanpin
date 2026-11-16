@@ -190,10 +190,22 @@ export class ImportsService implements OnModuleInit {
             AND (p."最近上榜日期" IS NULL OR v."周开始日期" >= p."最近上榜日期")
         `);
 
-        const categoryByName = new Map(allRows.map(({ row }) => [row.categoryName, {
-          categoryName: row.categoryName, categoryLevel1: row.categoryLevel1, categoryLevel2: row.categoryLevel2,
-        }]));
-        const categoryNames = [...categoryByName.keys()];
+        const categoryByName = new Map<string, Prisma.CategoryCreateManyInput>();
+        for (const { row } of allRows) {
+          if (!categoryByName.has(row.categoryLevel1)) {
+            categoryByName.set(row.categoryLevel1, {
+              categoryName: row.categoryLevel1,
+              categoryLevel1: row.categoryLevel1,
+              categoryLevel2: null,
+            });
+          }
+          categoryByName.set(row.categoryName, {
+            categoryName: row.categoryName,
+            categoryLevel1: row.categoryLevel1,
+            categoryLevel2: row.categoryLevel2,
+          });
+        }
+        const categoryNames = [...new Set(allRows.map(({ row }) => row.categoryName))];
         await this.prisma.category.createMany({ data: [...categoryByName.values()], skipDuplicates: true });
 
         const starts = [...new Map(allRows.map((item) => [dayKey(item.row.weekStart), item.row.weekStart])).values()];

@@ -8,9 +8,10 @@ import { HealthController } from "./health.controller";
 import { PrismaModule } from "./prisma/prisma.module";
 import { ProductsModule } from "./products/products.module";
 import { DmpModule } from "./dmp/dmp.module";
+import { CategoriesModule } from "./categories/categories.module";
 
 @Module({
-  imports: [PrismaModule, AuthModule, AdminModule, ProductsModule, ImportsModule, DmpModule],
+  imports: [PrismaModule, AuthModule, AdminModule, ProductsModule, ImportsModule, DmpModule, CategoriesModule],
   controllers: [HealthController],
   providers: [{ provide: APP_GUARD, useExisting: AuthGuard }],
 })
