@@ -87,6 +87,11 @@ function quoteSystemd(value) {
   return `"${value.replaceAll("\\", "\\\\").replaceAll('"', '\\"').replaceAll("%", "%%")}"`;
 }
 
+// WorkingDirectory= 不支持引号（引号会被当作路径的一部分），只能原样写入并转义 % 说明符。
+function systemdPath(value) {
+  return value.replaceAll("%", "%%");
+}
+
 function validateEnvironment() {
   const envPath = path.join(ROOT, ".env");
   if (!existsSync(envPath)) {
@@ -354,7 +359,7 @@ function installSystemdService(user, group) {
     "Type=simple",
     `User=${user}`,
     `Group=${group}`,
-    `WorkingDirectory=${quoteSystemd(ROOT)}`,
+    `WorkingDirectory=${systemdPath(ROOT)}`,
     "Environment=NODE_ENV=production",
     "Environment=HOST=127.0.0.1",
     "Environment=SERVE_WEB=true",
