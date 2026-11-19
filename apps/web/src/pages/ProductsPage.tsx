@@ -1,6 +1,6 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Button, Card, Checkbox, Empty, Image, Input, InputNumber, Pagination, Segmented, Select, Space, Table, Tag, Tooltip, Typography, message } from "antd";
+import { Button, Card, Checkbox, DatePicker, Empty, Image, Input, InputNumber, Pagination, Segmented, Select, Space, Table, Tag, Tooltip, Typography, message } from "antd";
 import { CloudDownloadOutlined, FilterOutlined, LinkOutlined, ReloadOutlined, SearchOutlined, StarFilled, StarOutlined } from "@ant-design/icons";
 import type { ColumnsType } from "antd/es/table";
 import dayjs from "dayjs";
@@ -14,6 +14,8 @@ interface Filters {
   categoryLevel1?: string;
   categoryLevel2?: string;
   shopType?: string;
+  listingDateFrom?: string;
+  listingDateTo?: string;
   latestWeekStarts?: string[];
   latestBuyerMedianMin?: number;
   latestBuyerMedianMax?: number;
@@ -345,15 +347,6 @@ export function ProductsPage() {
 
   return (
     <div className="page-stack products-page">
-      <div className="page-heading-row page-heading-compact">
-        <div>
-          <div className="eyebrow">PRODUCT OVERVIEW</div>
-          <Typography.Title level={2}>商品选品</Typography.Title>
-          <Typography.Text type="secondary">按商品 ID 汇总榜单记录</Typography.Text>
-        </div>
-        <Button icon={<ReloadOutlined />} onClick={() => void activeQuery.refetch()}>刷新数据</Button>
-      </div>
-
       <Card className="filter-card filter-card-compact" bordered={false}>
         <div className="filter-title"><FilterOutlined /> 筛选商品</div>
         <div className="filter-grid">
@@ -387,6 +380,21 @@ export function ProductsPage() {
           <div className="filter-field filter-field-shop-type">
             <label htmlFor="filter-shop-type">店铺类型</label>
             <Select id="filter-shop-type" allowClear value={draft.shopType} onChange={(value) => setDraft((prev) => ({ ...prev, shopType: value }))} placeholder="全部" options={[{ label: "淘宝", value: "淘宝" }, { label: "天猫", value: "天猫" }]} />
+          </div>
+          <div className="filter-field filter-field-listing-date">
+            <label htmlFor="filter-listing-date">上架日期</label>
+            <DatePicker.RangePicker
+              id="filter-listing-date"
+              allowClear
+              format="YYYY-MM-DD"
+              placeholder={["开始日期", "结束日期"]}
+              value={draft.listingDateFrom && draft.listingDateTo ? [dayjs(draft.listingDateFrom), dayjs(draft.listingDateTo)] : null}
+              onChange={(value) => setDraft((prev) => ({
+                ...prev,
+                listingDateFrom: value?.[0]?.format("YYYY-MM-DD"),
+                listingDateTo: value?.[1]?.format("YYYY-MM-DD"),
+              }))}
+            />
           </div>
           <div className="filter-field filter-field-range filter-field-second-row">
             <label htmlFor="filter-history-weeks-min">上榜周数</label>
@@ -434,7 +442,11 @@ export function ProductsPage() {
               <Checkbox id="filter-favorites" checked={draft.favoritesOnly ?? false} onChange={(event) => setDraft((prev) => ({ ...prev, favoritesOnly: event.target.checked || undefined }))}>仅看我的收藏</Checkbox>
             </div>
           )}
-          <Space className="filter-actions filter-field-second-row"><Button type="primary" onClick={applyFilters}>查询</Button><Button onClick={resetFilters}>重置</Button></Space>
+          <Space className="filter-actions filter-field-second-row">
+            <Button type="primary" onClick={applyFilters}>查询</Button>
+            <Button onClick={resetFilters}>重置</Button>
+            <Button icon={<ReloadOutlined />} onClick={() => void activeQuery.refetch()}>刷新数据</Button>
+          </Space>
         </div>
       </Card>
 

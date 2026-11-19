@@ -19,6 +19,8 @@ export class ProductsController {
     return this.productsService.list({
       ...query,
       latestWeekStarts,
+      listingDateFrom: typeof query.listingDateFrom === "string" ? query.listingDateFrom : undefined,
+      listingDateTo: typeof query.listingDateTo === "string" ? query.listingDateTo : undefined,
       latestBuyerMedianMin: numeric(query.latestBuyerMedianMin),
       latestBuyerMedianMax: numeric(query.latestBuyerMedianMax),
       historyWeekCountMin: numeric(query.historyWeekCountMin),
@@ -43,6 +45,8 @@ export class ProductsController {
     return this.productsService.teamFavorites({
       ...query,
       latestWeekStarts,
+      listingDateFrom: typeof query.listingDateFrom === "string" ? query.listingDateFrom : undefined,
+      listingDateTo: typeof query.listingDateTo === "string" ? query.listingDateTo : undefined,
       latestBuyerMedianMin: numeric(query.latestBuyerMedianMin),
       latestBuyerMedianMax: numeric(query.latestBuyerMedianMax),
       historyWeekCountMin: numeric(query.historyWeekCountMin),

@@ -116,6 +116,33 @@ export class ProductsService {
     return [...matchingProductIds];
   }
 
+  /** 按商品ID推算出的上架日期筛选；SQL ROUND 与 WPS ROUND 一样按半值远离0取整。 */
+  private async findProductIdsByListingDateRange(fromValue?: string, toValue?: string): Promise<string[] | undefined> {
+    const normalizeDate = (value?: string) => {
+      if (value === undefined || value === "") return undefined;
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) throw new BadRequestException("上架日期格式不正确。");
+      const date = new Date(`${value}T00:00:00.000Z`);
+      if (Number.isNaN(date.getTime()) || date.toISOString().slice(0, 10) !== value) {
+        throw new BadRequestException("上架日期无效。");
+      }
+      return value;
+    };
+    const from = normalizeDate(fromValue);
+    const to = normalizeDate(toValue);
+    if (!from && !to) return undefined;
+    if (from && to && from > to) throw new BadRequestException("上架日期范围的开始日期不能晚于结束日期。");
+
+    const listingDayOffset = Prisma.sql`ROUND((p."商品ID"::numeric - 1052407159281::numeric) / 300000000::numeric)`;
+    const rows = await this.prisma.$queryRaw<Array<{ productId: string }>>(Prisma.sql`
+      SELECT p."商品ID" AS "productId"
+      FROM "商品主表" p
+      WHERE p."商品ID" ~ '^[0-9]+$'
+      ${from ? Prisma.sql`AND ${listingDayOffset} >= (${from}::date - DATE '2026-05-24')` : Prisma.empty}
+      ${to ? Prisma.sql`AND ${listingDayOffset} <= (${to}::date - DATE '2026-05-24')` : Prisma.empty}
+    `);
+    return rows.map((row) => row.productId);
+  }
+
   async list(query: {
     page?: number;
     pageSize?: number;
@@ -123,6 +150,8 @@ export class ProductsService {
     categoryLevel1?: string;
     categoryLevel2?: string;
     shopType?: string;
+    listingDateFrom?: string;
+    listingDateTo?: string;
     latestWeekStarts?: string[];
     latestBuyerMedianMin?: number;
     latestBuyerMedianMax?: number;
@@ -139,6 +168,8 @@ export class ProductsService {
     const page = Math.max(1, Number(query.page ?? 1));
     const pageSize = Math.min(100, Math.max(10, Number(query.pageSize ?? 20)));
     const where: Prisma.ProductWhereInput = {};
+    const listingDateProductIds = await this.findProductIdsByListingDateRange(query.listingDateFrom, query.listingDateTo);
+    if (listingDateProductIds !== undefined) where.AND = [{ productId: { in: listingDateProductIds } }];
     if (query.keyword?.trim()) {
       const keyword = query.keyword.trim();
       where.OR = [
@@ -265,6 +296,8 @@ export class ProductsService {
     categoryLevel1?: string;
     categoryLevel2?: string;
     shopType?: string;
+    listingDateFrom?: string;
+    listingDateTo?: string;
     latestWeekStarts?: string[];
     latestBuyerMedianMin?: number;
     latestBuyerMedianMax?: number;
@@ -292,6 +325,8 @@ export class ProductsService {
     }
     const memberWhere: Prisma.UserWhereInput = { AND: memberConditions };
     const where: Prisma.ProductWhereInput = { favorites: { some: { user: memberWhere } } };
+    const listingDateProductIds = await this.findProductIdsByListingDateRange(query.listingDateFrom, query.listingDateTo);
+    if (listingDateProductIds !== undefined) where.AND = [{ productId: { in: listingDateProductIds } }];
     if (query.keyword?.trim()) {
       const keyword = query.keyword.trim();
       where.OR = [

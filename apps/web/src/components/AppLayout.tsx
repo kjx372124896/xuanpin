@@ -1,4 +1,4 @@
-import { Button, Layout, Menu, Space } from "antd";
+import { Button, Layout, Menu } from "antd";
 import { AppstoreOutlined, DatabaseOutlined, ImportOutlined, KeyOutlined, LogoutOutlined, SettingOutlined, ShopOutlined } from "@ant-design/icons";
 import { Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
@@ -31,18 +31,16 @@ export function AppLayout() {
         <div className="nav-caption">工作台</div>
         <Menu mode="inline" selectedKeys={[selectedKey]} items={items} onClick={({ key }) => navigate(key)} className="main-menu" />
         <div className="sider-footer">
-          <div className="sider-footer-mark">SI</div>
-          <div><div className="sider-footer-title">内部选品系统</div><div className="sider-footer-sub">数据仅供团队使用</div></div>
+          <div className="user-avatar sider-user-avatar">{user?.name?.slice(0, 1) || "U"}</div>
+          <div className="sider-footer-user">
+            <div className="user-name">{user?.name}</div>
+            <div className="user-role">{roleNames[user?.role ?? "EMPLOYEE"]}</div>
+          </div>
+          <Button type="text" icon={<LogoutOutlined />} title="退出登录" aria-label="退出登录" onClick={() => void logout().then(() => navigate("/login"))}>退出</Button>
         </div>
       </Sider>
       <Layout>
-        <Header className="app-header">
-          <div className="header-context">市场数据 · 商品趋势 · 周期追踪</div>
-          <Space size={14}>
-            <div className="user-chip"><div className="user-avatar">{user?.name?.slice(0, 1) || "U"}</div><div><div className="user-name">{user?.name}</div><div className="user-role">{roleNames[user?.role ?? "EMPLOYEE"]}</div></div></div>
-            <Button type="text" icon={<LogoutOutlined />} onClick={() => void logout().then(() => navigate("/login"))}>退出</Button>
-          </Space>
-        </Header>
+        {!isProductList && <Header className="app-header"><div className="header-context">市场数据 · 商品趋势 · 周期追踪</div></Header>}
         <Content className={isProductList ? "app-content app-content-products" : "app-content"}><Outlet /></Content>
       </Layout>
     </Layout>

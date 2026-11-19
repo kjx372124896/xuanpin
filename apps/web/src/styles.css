@@ -6,6 +6,7 @@ a { color: #315efb; }
 .app-shell { height: 100vh; min-height: 0; overflow: hidden; }
 .app-shell > .ant-layout { width: calc(100% - 224px); height: 100vh; min-width: 0; margin-left: 224px; }
 .app-sider { border-right: 1px solid #edf0f5; position: fixed; left: 0; top: 0; bottom: 0; height: 100vh; min-height: 0; overflow-y: auto; z-index: 20; }
+.app-sider .ant-layout-sider-children { display: flex; flex-direction: column; min-height: 100%; }
 .brand-lockup { display: flex; align-items: center; gap: 12px; padding: 27px 22px 30px; }
 .brand-icon { width: 40px; height: 40px; border-radius: 13px; display: grid; place-items: center; color: #fff; font-size: 19px; background: linear-gradient(145deg,#4777ff,#3153df); box-shadow: 0 8px 18px rgba(49,94,251,.2); }
 .brand-title { font-size: 16px; font-weight: 700; letter-spacing: .2px; color: #1d2738; }
@@ -14,10 +15,12 @@ a { color: #315efb; }
 .main-menu { border-inline-end: 0 !important; padding: 0 12px; }
 .main-menu .ant-menu-item { height: 44px; line-height: 44px; margin: 4px 0; border-radius: 9px; color: #687487; }
 .main-menu .ant-menu-item-selected { color: #315efb !important; background: #eef3ff !important; font-weight: 600; }
-.sider-footer { position: absolute; left: 18px; right: 18px; bottom: 24px; border: 1px solid #edf0f5; background: #fafbfc; border-radius: 12px; padding: 12px; display: flex; align-items: center; gap: 10px; }
-.sider-footer-mark { width: 30px; height: 30px; border-radius: 9px; display: grid; place-items: center; color: #315efb; background: #eaf0ff; font-size: 11px; font-weight: 700; }
-.sider-footer-title { font-size: 12px; font-weight: 600; color: #475368; }
-.sider-footer-sub { margin-top: 2px; font-size: 10px; color: #a2aabb; }
+.sider-footer { flex: 0 0 auto; margin: auto 14px 18px; border: 1px solid #edf0f5; background: #fafbfc; border-radius: 12px; padding: 9px 8px; display: flex; align-items: center; gap: 8px; min-width: 0; }
+.sider-user-avatar { flex: 0 0 32px; width: 32px; height: 32px; font-size: 12px; }
+.sider-footer-user { flex: 1 1 auto; min-width: 0; }
+.sider-footer .user-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sider-footer .user-role { white-space: nowrap; }
+.sider-footer > .ant-btn { flex: 0 0 auto; padding-inline: 7px; color: #667085; }
 .app-header { height: 66px; line-height: normal; background: rgba(255,255,255,.92); border-bottom: 1px solid #edf0f5; display: flex; align-items: center; justify-content: space-between; padding: 0 30px; position: sticky; top: 0; z-index: 5; }
 .header-context { font-size: 12px; color: #929daf; letter-spacing: .2px; }
 .user-chip { display: flex; align-items: center; gap: 9px; }
@@ -153,10 +156,6 @@ a { color: #315efb; }
 .app-content-products > .products-page { width: 100%; }
 .products-page { height: 100%; min-height: 0; }
 .products-page.page-stack { gap: 10px; }
-.page-heading-compact { flex: 0 0 auto; min-height: 56px; margin: 0; }
-.page-heading-compact h2.ant-typography { margin: 2px 0 2px; font-size: 21px; line-height: 1.25; }
-.page-heading-compact .eyebrow { font-size: 9px; }
-.page-heading-compact .ant-typography-secondary { font-size: 11px; }
 /* ==================== 商品选品页：筛选区域布局调整说明 ==================== */
 .filter-card-compact { flex: 0 0 auto; }
 .filter-card-compact > .ant-card-body { padding: 10px 14px; overflow-x: auto; }
@@ -165,13 +164,13 @@ a { color: #315efb; }
 /*
  * ① 筛选区整体宽度与筛选项分布（本次主要调整这里）
  * width:100%：让筛选网格铺满卡片可用宽度，把右侧红框空白也利用起来。
- * min-width:1320px：保留窄屏时原来的最小内容宽度，不挤压筛选项。
- * repeat(6,210px)：一行6个固定宽度的筛选项；每项仍是原来的210px，不会放大输入框。
+ * min-width:1380px：包含6列宽度和5个列间距，窄屏时不挤压筛选项。
+ * 前5列210px：保留原筛选项宽度；第6列270px：给上架日期范围选择器留出完整空间。
  * justify-content:space-between：把多出来的横向空白均匀分配到6个筛选项之间。
  * gap:10px 12px：上下间距10px、左右最小间距12px，保留原来的上下/基础间距。
  * 想让筛选项之间更远，优先保持210px不变，让容器继续占满可用宽度；不要把210px改大。
  */
-.filter-card-compact .filter-grid { width: 100%; min-width: 1320px; grid-template-columns: repeat(6,210px); justify-content: space-between; grid-auto-flow: row; gap: 10px 12px; }
+.filter-card-compact .filter-grid { width: 100%; min-width: 1380px; grid-template-columns: repeat(5,210px) 270px; justify-content: space-between; grid-auto-flow: row; gap: 10px 12px; }
 
 /*
  * ② 每个筛选条件内部尺寸（保持当前设置不变）
@@ -214,18 +213,21 @@ a { color: #315efb; }
 /* 查询/重置按钮放在第二行最后一个筛选项后面；占用1个固定列，不改变按钮本身尺寸。 */
 /*
  * ⑤ 两排筛选项位置（本次调整）
- * 店铺类型：固定在第一排第5列，正好位于第二排收藏范围/收藏成员上方。
- * 第一排第6列留空，对应第二排查询/重置按钮上方也保持空白。
+ * 店铺类型：固定在第一排第5列；上架日期范围控件固定在第6列，紧跟店铺类型。
+ * 第二排依次放置数值筛选、数据状态、收藏范围和操作按钮。
  * filter-field-second-row：上榜周数及其后面的筛选项统一固定在第二排，
  * 按页面中的先后顺序从第1列排到第6列。
  * 这里只控制网格位置，不改变每列210px宽度、标签/输入框尺寸和项目间距。
  */
 .filter-card-compact .filter-field-shop-type { grid-column: 5; grid-row: 1; }
+.filter-card-compact .filter-field-listing-date { grid-column: 6; grid-row: 1; }
 .filter-card-compact .filter-field-second-row { grid-row: 2; }
 
 .filter-card-compact .filter-actions { grid-column: span 1; justify-self: start; gap: 6px; white-space: nowrap; }
 .filter-card-compact .filter-actions .ant-btn { padding-inline: 10px; }
 .filter-card-compact .filter-field-favorites .ant-checkbox-wrapper { white-space: nowrap; }
+.filter-card-compact .filter-field-listing-date .ant-picker { width: 100%; min-width: 0; padding-inline: 7px; }
+.filter-card-compact .filter-field-listing-date .ant-picker-input > input { font-size: 10px; }
 .filter-card-compact .ant-input-affix-wrapper,
 .filter-card-compact .ant-select-selector,
 .filter-card-compact .ant-btn { min-height: 34px; }
@@ -288,15 +290,13 @@ a { color: #315efb; }
   .app-shell > .ant-layout { width: 100%; margin-left: 0; }
   .app-content-products { padding: 10px 10px 12px; }
   /*
-   * 窄屏下沿用6个固定210px列，保持每个筛选项尺寸不变。
+   * 窄屏下沿用前5列210px、第6列270px的布局，保持筛选控件尺寸不变。
    * 屏幕较窄时筛选卡片可横向滚动，不会把标签和输入框压扁或挤到一起。
    */
-  .filter-card-compact .filter-grid { grid-template-columns: repeat(6,210px); justify-content: space-between; min-width: 1320px; }
-  .filter-card-compact .filter-field:not(.filter-field-range),
+  .filter-card-compact .filter-grid { grid-template-columns: repeat(5,210px) 270px; justify-content: space-between; min-width: 1380px; }
+  .filter-card-compact .filter-field:not(.filter-field-range):not(.filter-field-shop-type):not(.filter-field-listing-date),
   .filter-card-compact .filter-actions { grid-column: span 1 !important; }
   .filter-card-compact .filter-field-range { grid-column: span 1 !important; }
-  .page-heading-compact { align-items: flex-start; flex-direction: row; }
-  .page-heading-compact .ant-typography-secondary { display: none; }
   .table-heading { align-items: flex-start; flex-direction: column; }
   .bulk-ai-actions { width: 100%; flex-wrap: wrap; }
   .table-heading-actions { width: 100%; justify-content: space-between; flex-wrap: wrap; }
