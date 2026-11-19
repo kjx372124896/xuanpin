@@ -19,9 +19,12 @@ export class ProductsController {
     return this.productsService.list({
       ...query,
       latestWeekStarts,
-      latestBuyerMedianGt: numeric(query.latestBuyerMedianGt),
+      latestBuyerMedianMin: numeric(query.latestBuyerMedianMin),
+      latestBuyerMedianMax: numeric(query.latestBuyerMedianMax),
       historyWeekCountMin: numeric(query.historyWeekCountMin),
+      historyWeekCountMax: numeric(query.historyWeekCountMax),
       consecutiveWeekCountMin: numeric(query.consecutiveWeekCountMin),
+      consecutiveWeekCountMax: numeric(query.consecutiveWeekCountMax),
       aiMetricsStatus: query.aiMetricsStatus === "NOT_FETCHED" || query.aiMetricsStatus === "FETCHED" ? query.aiMetricsStatus : undefined,
       favoritesOnly: query.favoritesOnly === "true" || query.favoritesOnly === true,
       userId: request.user.id,
@@ -40,9 +43,12 @@ export class ProductsController {
     return this.productsService.teamFavorites({
       ...query,
       latestWeekStarts,
-      latestBuyerMedianGt: numeric(query.latestBuyerMedianGt),
+      latestBuyerMedianMin: numeric(query.latestBuyerMedianMin),
+      latestBuyerMedianMax: numeric(query.latestBuyerMedianMax),
       historyWeekCountMin: numeric(query.historyWeekCountMin),
+      historyWeekCountMax: numeric(query.historyWeekCountMax),
       consecutiveWeekCountMin: numeric(query.consecutiveWeekCountMin),
+      consecutiveWeekCountMax: numeric(query.consecutiveWeekCountMax),
       aiMetricsStatus: query.aiMetricsStatus === "NOT_FETCHED" || query.aiMetricsStatus === "FETCHED" ? query.aiMetricsStatus : undefined,
       adminUserId: request.user.id,
     });

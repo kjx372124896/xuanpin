@@ -3,6 +3,15 @@ import { Prisma } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
 import { parseAiMetricsMarkdown } from "./ai-metrics-parser";
 import { aiMetricsStatusWhere, type AiMetricsStatus } from "./ai-metrics-status";
+import { consecutiveWeekCountEndingAt, isConsecutiveWeekCountInRange } from "./consecutive-week-filter";
+import { calculateListingDate } from "./listing-date";
+
+function normalizePeriodStarts(values?: string[]): string[] {
+  return [...new Set(values ?? [])].filter((value) => {
+    const date = new Date(`${value}T00:00:00.000Z`);
+    return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value;
+  });
+}
 
 function range(
   raw: string | null,
@@ -21,6 +30,7 @@ function range(
 function mapProduct(product: any) {
   return {
     productId: product.productId,
+    listingDate: calculateListingDate(product.productId),
     productName: product.productName,
     productUrl: product.productUrl,
     shopName: product.shopName,
@@ -56,6 +66,56 @@ function mapProduct(product: any) {
 export class ProductsService {
   constructor(private readonly prisma: PrismaService) {}
 
+  /**
+   * 以筛选器选中的上榜周期为终点，按每个商品的历史周记录向前回溯。
+   * 同一商品在一个周期命中多个类目时，只按一个上榜周计算。
+   */
+  private async findProductsByConsecutiveWeeksAtPeriods(
+    periods: string[],
+    min?: number,
+    max?: number,
+  ): Promise<string[]> {
+    if (!periods.length) return [];
+
+    const selectedPeriods = periods.map((value) => Prisma.sql`(${value}::date)`);
+    const rows = await this.prisma.$queryRaw<Array<{
+      productId: string;
+      anchorDate: string;
+      weekStarts: string[];
+    }>>(Prisma.sql`
+      WITH selected_periods("anchor_date") AS (
+        VALUES ${Prisma.join(selectedPeriods)}
+      ),
+      anchor_products AS (
+        SELECT DISTINCT h."商品ID", sp."anchor_date"
+        FROM "商品上榜历史表" h
+        INNER JOIN selected_periods sp ON h."周开始日期" = sp."anchor_date"
+      ),
+      history_weeks AS (
+        SELECT DISTINCT "商品ID", "周开始日期"
+        FROM "商品上榜历史表"
+      )
+      SELECT
+        a."商品ID" AS "productId",
+        to_char(a."anchor_date", 'YYYY-MM-DD') AS "anchorDate",
+        ARRAY_AGG(to_char(hw."周开始日期", 'YYYY-MM-DD') ORDER BY hw."周开始日期" DESC) AS "weekStarts"
+      FROM anchor_products a
+      INNER JOIN history_weeks hw
+        ON hw."商品ID" = a."商品ID"
+       AND hw."周开始日期" <= a."anchor_date"
+      GROUP BY a."商品ID", a."anchor_date"
+    `);
+
+    const matchingProductIds = new Set<string>();
+    for (const row of rows) {
+      const count = consecutiveWeekCountEndingAt(row.anchorDate, row.weekStarts);
+      if (isConsecutiveWeekCountInRange(count, min, max)) {
+        matchingProductIds.add(row.productId);
+      }
+    }
+    return [...matchingProductIds];
+  }
+
   async list(query: {
     page?: number;
     pageSize?: number;
@@ -64,9 +124,12 @@ export class ProductsService {
     categoryLevel2?: string;
     shopType?: string;
     latestWeekStarts?: string[];
-    latestBuyerMedianGt?: number;
+    latestBuyerMedianMin?: number;
+    latestBuyerMedianMax?: number;
     historyWeekCountMin?: number;
+    historyWeekCountMax?: number;
     consecutiveWeekCountMin?: number;
+    consecutiveWeekCountMax?: number;
     aiMetricsStatus?: AiMetricsStatus;
     favoritesOnly?: boolean;
     userId: string;
@@ -87,14 +150,44 @@ export class ProductsService {
     if (query.categoryLevel1) where.latestCategoryLevel1 = query.categoryLevel1;
     if (query.categoryLevel2) where.latestCategoryLevel2 = query.categoryLevel2;
     if (query.shopType) where.shopType = query.shopType;
+    const selectedPeriods = normalizePeriodStarts(query.latestWeekStarts);
+    const hasConsecutiveWeekRange = query.consecutiveWeekCountMin !== undefined || query.consecutiveWeekCountMax !== undefined;
     if (query.latestWeekStarts?.length) {
-      where.latestWeekStart = { in: query.latestWeekStarts.map((value) => new Date(value + "T00:00:00.000Z")) };
+      if (hasConsecutiveWeekRange) {
+        where.productId = {
+          in: await this.findProductsByConsecutiveWeeksAtPeriods(
+            selectedPeriods,
+            query.consecutiveWeekCountMin,
+            query.consecutiveWeekCountMax,
+          ),
+        };
+      } else {
+        where.histories = {
+          some: { weekStart: { in: selectedPeriods.map((value) => new Date(`${value}T00:00:00.000Z`)) } },
+        };
+      }
+    } else if (hasConsecutiveWeekRange) {
+      where.consecutiveWeekCount = {
+        ...(query.consecutiveWeekCountMin !== undefined ? { gte: query.consecutiveWeekCountMin } : {}),
+        ...(query.consecutiveWeekCountMax !== undefined ? { lte: query.consecutiveWeekCountMax } : {}),
+      };
     }
-    if (query.latestBuyerMedianGt !== undefined && Number.isFinite(query.latestBuyerMedianGt)) {
-      where.latestBuyerMedian = { gt: new Prisma.Decimal(query.latestBuyerMedianGt) };
+    if (query.latestBuyerMedianMin !== undefined || query.latestBuyerMedianMax !== undefined) {
+      where.latestBuyerMedian = {
+        ...(query.latestBuyerMedianMin !== undefined && Number.isFinite(query.latestBuyerMedianMin)
+          ? { gte: new Prisma.Decimal(query.latestBuyerMedianMin) }
+          : {}),
+        ...(query.latestBuyerMedianMax !== undefined && Number.isFinite(query.latestBuyerMedianMax)
+          ? { lte: new Prisma.Decimal(query.latestBuyerMedianMax) }
+          : {}),
+      };
     }
-    if (query.historyWeekCountMin !== undefined) where.historyWeekCount = { gte: query.historyWeekCountMin };
-    if (query.consecutiveWeekCountMin !== undefined) where.consecutiveWeekCount = { gte: query.consecutiveWeekCountMin };
+    if (query.historyWeekCountMin !== undefined || query.historyWeekCountMax !== undefined) {
+      where.historyWeekCount = {
+        ...(query.historyWeekCountMin !== undefined ? { gte: query.historyWeekCountMin } : {}),
+        ...(query.historyWeekCountMax !== undefined ? { lte: query.historyWeekCountMax } : {}),
+      };
+    }
     Object.assign(where, aiMetricsStatusWhere(query.aiMetricsStatus));
     if (query.favoritesOnly) where.favorites = { some: { userId: query.userId } };
 
@@ -104,9 +197,14 @@ export class ProductsService {
       historyWeekCount: { historyWeekCount: query.direction === "asc" ? "asc" : "desc" },
       consecutiveWeekCount: { consecutiveWeekCount: query.direction === "asc" ? "asc" : "desc" },
       productName: { productName: query.direction === "desc" ? "desc" : "asc" },
-      latestBuyerMedian: { latestBuyerMedian: query.direction === "asc" ? "asc" : "desc" },
+      latestBuyerMedian: {
+        latestBuyerMedian: {
+          sort: query.direction === "asc" ? "asc" : "desc",
+          nulls: "last",
+        },
+      },
     };
-    const orderBy = sortMap[query.sort ?? "latestWeekStart"] ?? sortMap.latestWeekStart;
+    const orderBy = sortMap[query.sort ?? "latestBuyerMedian"] ?? sortMap.latestBuyerMedian;
     const [items, total] = await Promise.all([
       this.prisma.product.findMany({ where, orderBy, skip: (page - 1) * pageSize, take: pageSize }),
       this.prisma.product.count({ where }),
@@ -168,9 +266,12 @@ export class ProductsService {
     categoryLevel2?: string;
     shopType?: string;
     latestWeekStarts?: string[];
-    latestBuyerMedianGt?: number;
+    latestBuyerMedianMin?: number;
+    latestBuyerMedianMax?: number;
     historyWeekCountMin?: number;
+    historyWeekCountMax?: number;
     consecutiveWeekCountMin?: number;
+    consecutiveWeekCountMax?: number;
     aiMetricsStatus?: AiMetricsStatus;
     adminUserId: string;
   }) {
@@ -202,18 +303,50 @@ export class ProductsService {
     if (query.categoryLevel1) where.latestCategoryLevel1 = query.categoryLevel1;
     if (query.categoryLevel2) where.latestCategoryLevel2 = query.categoryLevel2;
     if (query.shopType) where.shopType = query.shopType;
-    if (query.latestWeekStarts?.length) where.latestWeekStart = { in: query.latestWeekStarts.map((value) => new Date(value + "T00:00:00.000Z")) };
-    if (query.latestBuyerMedianGt !== undefined && Number.isFinite(query.latestBuyerMedianGt)) {
-      where.latestBuyerMedian = { gt: new Prisma.Decimal(query.latestBuyerMedianGt) };
+    const selectedPeriods = normalizePeriodStarts(query.latestWeekStarts);
+    const hasConsecutiveWeekRange = query.consecutiveWeekCountMin !== undefined || query.consecutiveWeekCountMax !== undefined;
+    if (query.latestWeekStarts?.length) {
+      if (hasConsecutiveWeekRange) {
+        where.productId = {
+          in: await this.findProductsByConsecutiveWeeksAtPeriods(
+            selectedPeriods,
+            query.consecutiveWeekCountMin,
+            query.consecutiveWeekCountMax,
+          ),
+        };
+      } else {
+        where.histories = {
+          some: { weekStart: { in: selectedPeriods.map((value) => new Date(`${value}T00:00:00.000Z`)) } },
+        };
+      }
+    } else if (hasConsecutiveWeekRange) {
+      where.consecutiveWeekCount = {
+        ...(query.consecutiveWeekCountMin !== undefined ? { gte: query.consecutiveWeekCountMin } : {}),
+        ...(query.consecutiveWeekCountMax !== undefined ? { lte: query.consecutiveWeekCountMax } : {}),
+      };
     }
-    if (query.historyWeekCountMin !== undefined) where.historyWeekCount = { gte: query.historyWeekCountMin };
-    if (query.consecutiveWeekCountMin !== undefined) where.consecutiveWeekCount = { gte: query.consecutiveWeekCountMin };
+    if (query.latestBuyerMedianMin !== undefined || query.latestBuyerMedianMax !== undefined) {
+      where.latestBuyerMedian = {
+        ...(query.latestBuyerMedianMin !== undefined && Number.isFinite(query.latestBuyerMedianMin)
+          ? { gte: new Prisma.Decimal(query.latestBuyerMedianMin) }
+          : {}),
+        ...(query.latestBuyerMedianMax !== undefined && Number.isFinite(query.latestBuyerMedianMax)
+          ? { lte: new Prisma.Decimal(query.latestBuyerMedianMax) }
+          : {}),
+      };
+    }
+    if (query.historyWeekCountMin !== undefined || query.historyWeekCountMax !== undefined) {
+      where.historyWeekCount = {
+        ...(query.historyWeekCountMin !== undefined ? { gte: query.historyWeekCountMin } : {}),
+        ...(query.historyWeekCountMax !== undefined ? { lte: query.historyWeekCountMax } : {}),
+      };
+    }
     Object.assign(where, aiMetricsStatusWhere(query.aiMetricsStatus));
 
     const [items, total] = await Promise.all([
       this.prisma.product.findMany({
         where,
-        orderBy: { latestWeekStart: "desc" },
+        orderBy: { latestBuyerMedian: { sort: "desc", nulls: "last" } },
         skip: (page - 1) * pageSize,
         take: pageSize,
         include: {
@@ -282,13 +415,12 @@ export class ProductsService {
   }
 
   async periods() {
-    const rows = await this.prisma.product.findMany({
-      where: { latestWeekStart: { not: null } },
-      distinct: ["latestWeekStart"],
-      orderBy: { latestWeekStart: "desc" },
-      select: { latestWeekStart: true },
+    const rows = await this.prisma.productHistory.findMany({
+      distinct: ["weekStart"],
+      orderBy: { weekStart: "desc" },
+      select: { weekStart: true },
     });
-    return { periods: rows.map((row) => row.latestWeekStart!.toISOString().slice(0, 10)) };
+    return { periods: rows.map((row) => row.weekStart.toISOString().slice(0, 10)) };
   }
 
   async importAiMetrics(productIdsInput: unknown, markdownInput: unknown) {

@@ -23,6 +23,7 @@ export interface MetricRange {
 
 export interface ProductListItem {
   productId: string;
+  listingDate: string | null;
   productName: string;
   productUrl: string | null;
   shopName: string | null;

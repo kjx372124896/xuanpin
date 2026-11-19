@@ -15,9 +15,12 @@ interface Filters {
   categoryLevel2?: string;
   shopType?: string;
   latestWeekStarts?: string[];
-  latestBuyerMedianGt?: number;
+  latestBuyerMedianMin?: number;
+  latestBuyerMedianMax?: number;
   historyWeekCountMin?: number;
+  historyWeekCountMax?: number;
   consecutiveWeekCountMin?: number;
+  consecutiveWeekCountMax?: number;
   aiMetricsStatus?: "NOT_FETCHED" | "FETCHED";
   favoritesOnly?: boolean;
 }
@@ -44,13 +47,15 @@ function BuyerTrend({ points }: { points: ProductListItem["buyerTrend"] }) {
 
   const lowerValues = validPoints.map((point) => point.min ?? point.median ?? point.max ?? 0);
   const upperValues = validPoints.map((point, index) => Math.max(lowerValues[index], point.max ?? point.median ?? lowerValues[index]));
-  const chartWidth = 330;
+  // 趋势小图横向放大1.5倍，图表高度保持158px不变。
+  const chartWidth = 495;
   const chartHeight = 158;
-  const plot = { left: 31, right: 8, top: 9, bottom: 27 };
+  const plot = { left: 38, right: 10, top: 25, bottom: 27 };
   const plotWidth = chartWidth - plot.left - plot.right;
   const plotHeight = chartHeight - plot.top - plot.bottom;
   const maxValue = Math.max(1, ...upperValues, ...validPoints.map((point) => point.median ?? 0));
-  const axisMax = Math.max(4, Math.ceil(maxValue / 4) * 4);
+  // 纵轴上限预留约18%空间，确保最高节点上方也能完整显示数值标签。
+  const axisMax = Math.max(4, Math.ceil((maxValue * 1.18) / 4) * 4);
   const yFor = (value: number) => plot.top + plotHeight - (Math.max(0, value) / axisMax) * plotHeight;
   const chartPoints = validPoints.map((point, index) => {
     const lower = lowerValues[index];
@@ -117,7 +122,24 @@ function BuyerTrend({ points }: { points: ProductListItem["buyerTrend"] }) {
               onBlur={() => setHoveredIndex(null)}
               style={{ cursor: "crosshair", outline: "none" }}
             >
-              {point.medianY !== null && <circle cx={point.x} cy={point.medianY} r="3.3" fill="#595c83" stroke="#fff" strokeWidth="1.2" />}
+              {point.medianY !== null && (
+                <>
+                  <text
+                    x={point.x}
+                    y={point.medianY - 9}
+                    fill="#45496f"
+                    stroke="#fff"
+                    strokeWidth="3"
+                    paintOrder="stroke"
+                    fontSize="10"
+                    fontWeight="700"
+                    textAnchor={index === 0 ? "start" : index === chartPoints.length - 1 ? "end" : "middle"}
+                  >
+                    {numberText(point.point.median)}
+                  </text>
+                  <circle cx={point.x} cy={point.medianY} r="3.3" fill="#595c83" stroke="#fff" strokeWidth="1.2" />
+                </>
+              )}
               <circle cx={point.x} cy={point.y} r="9" fill="transparent"><title>{`${dayjs(point.point.weekStart).format("YYYY-MM-DD")}：${numberText(point.point.median)}`}</title></circle>
             </g>
           ))}
@@ -194,21 +216,22 @@ export function ProductsPage() {
 
   const columns: ColumnsType<ProductTableRow> = [
     {
-      title: "商品", dataIndex: "productName", key: "productName", width: 230, fixed: "left",
+      title: "商品", dataIndex: "productName", key: "productName", width: 288, fixed: "left",
       render: (_value, item) => (
         <div className="product-cell">
           <Image
             src={item.imageUrl || undefined}
-            width={72}
-            height={72}
+            width={120}
+            height={120}
             className="product-thumb"
-            fallback="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='72' height='72'%3E%3Crect width='100%25' height='100%25' fill='%23edf1f7'/%3E%3C/svg%3E"
+            fallback="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Crect width='100%25' height='100%25' fill='%23edf1f7'/%3E%3C/svg%3E"
           />
           <div className="product-cell-copy">
             <div className="product-category">{[item.latestCategoryLevel1, item.latestCategoryLevel2].filter(Boolean).join(" / ") || "未分类"}</div>
             <Button type="link" className="product-name-link" onClick={() => setSelectedProductId(item.productId)}>{item.productName}</Button>
             <div className="product-meta-row">
               <Typography.Text type="secondary" className="product-id">ID：{item.productId}</Typography.Text>
+              <Typography.Text type="secondary" className="product-listing-date">上架日期：{item.listingDate || "—"}</Typography.Text>
               <Button type="link" size="small" icon={<LinkOutlined />} disabled={!item.productUrl} className="open-product-link" onClick={() => openProductUrl(item.productUrl)}>打开链接</Button>
             </div>
             <div className="product-shop-row">
@@ -241,7 +264,7 @@ export function ProductsPage() {
         </Tooltip>
       ),
     },
-    { title: "趋势", key: "buyerTrend", width: 360, render: (_value, item) => <BuyerTrend points={item.buyerTrend} /> },
+    { title: "趋势", key: "buyerTrend", width: 525, render: (_value, item) => <BuyerTrend points={item.buyerTrend} /> },
     { title: "上期销售额", dataIndex: "aiPreviousSales", key: "aiPreviousSales", width: 112, render: (value: string | null) => <span className="ai-metric-cell" title={value || undefined}>{value || "—"}</span> },
     { title: "销售额", dataIndex: "aiSales", key: "aiSales", width: 112, render: (value: string | null) => <span className="ai-metric-cell" title={value || undefined}>{value || "—"}</span> },
     { title: "点击率", dataIndex: "aiClickRate", key: "aiClickRate", width: 105, render: (value: string | null) => <span className="ai-metric-cell" title={value || undefined}>{value || "—"}</span> },
@@ -307,7 +330,7 @@ export function ProductsPage() {
         <div>
           <div className="eyebrow">PRODUCT OVERVIEW</div>
           <Typography.Title level={2}>商品选品</Typography.Title>
-          <Typography.Text type="secondary">按商品 ID 汇总榜单记录，查看支付买家数变化趋势。</Typography.Text>
+          <Typography.Text type="secondary">按商品 ID 汇总榜单记录</Typography.Text>
         </div>
         <Button icon={<ReloadOutlined />} onClick={() => void activeQuery.refetch()}>刷新数据</Button>
       </div>
@@ -320,7 +343,7 @@ export function ProductsPage() {
             <Input id="filter-keyword" allowClear value={draft.keyword} onChange={(event) => setDraft((prev) => ({ ...prev, keyword: event.target.value }))} onPressEnter={applyFilters} prefix={<SearchOutlined />} placeholder="名称 / ID / 店铺" />
           </div>
           <div className="filter-field filter-field-periods">
-            <label htmlFor="filter-periods">最新上榜周日期</label>
+            <label htmlFor="filter-periods">上榜周期</label>
             <Select
               id="filter-periods"
               mode="multiple"
@@ -342,31 +365,36 @@ export function ProductsPage() {
             <label htmlFor="filter-category-level2">二级类目</label>
             <Select id="filter-category-level2" allowClear showSearch optionFilterProp="label" disabled={!draft.categoryLevel1} value={draft.categoryLevel2} onChange={(value) => setDraft((prev) => ({ ...prev, categoryLevel2: value }))} placeholder="全部" options={(categoriesQuery.data?.level2 ?? []).map((value) => ({ label: value, value }))} />
           </div>
-          <div className="filter-field">
+          <div className="filter-field filter-field-shop-type">
             <label htmlFor="filter-shop-type">店铺类型</label>
             <Select id="filter-shop-type" allowClear value={draft.shopType} onChange={(value) => setDraft((prev) => ({ ...prev, shopType: value }))} placeholder="全部" options={[{ label: "淘宝", value: "淘宝" }, { label: "天猫", value: "天猫" }]} />
           </div>
-          <div className="filter-field">
-            <label htmlFor="filter-buyer-median">最新支付买家数中值 &gt;</label>
-            <InputNumber
-              id="filter-buyer-median"
-              min={0}
-              precision={0}
-              value={draft.latestBuyerMedianGt}
-              onChange={(value) => setDraft((prev) => ({ ...prev, latestBuyerMedianGt: value === null ? undefined : Number(value) }))}
-              placeholder="输入数值"
-            />
+          <div className="filter-field filter-field-range filter-field-second-row">
+            <label htmlFor="filter-history-weeks-min">上榜周数</label>
+            <div className="filter-range-control">
+              <InputNumber id="filter-history-weeks-min" min={0} precision={0} value={draft.historyWeekCountMin} onChange={(value) => setDraft((prev) => ({ ...prev, historyWeekCountMin: value === null ? undefined : Number(value) }))} placeholder="最小" />
+              <span className="filter-range-separator" aria-hidden="true">-</span>
+              <InputNumber id="filter-history-weeks-max" min={0} precision={0} value={draft.historyWeekCountMax} onChange={(value) => setDraft((prev) => ({ ...prev, historyWeekCountMax: value === null ? undefined : Number(value) }))} placeholder="最大" />
+            </div>
           </div>
-          <div className="filter-field">
-            <label htmlFor="filter-history-weeks">上榜周数 ≥</label>
-            <InputNumber id="filter-history-weeks" min={0} precision={0} value={draft.historyWeekCountMin} onChange={(value) => setDraft((prev) => ({ ...prev, historyWeekCountMin: value === null ? undefined : Number(value) }))} placeholder="输入周数" />
+          <div className="filter-field filter-field-range filter-field-second-row">
+            <label htmlFor="filter-consecutive-weeks-min"><Tooltip title="选择上榜周期后，以该周期为终点向前回溯连续上榜周数；未选择周期时，按商品最近上榜周期计算。">连续周数</Tooltip></label>
+            <div className="filter-range-control">
+              <InputNumber id="filter-consecutive-weeks-min" min={0} precision={0} value={draft.consecutiveWeekCountMin} onChange={(value) => setDraft((prev) => ({ ...prev, consecutiveWeekCountMin: value === null ? undefined : Number(value) }))} placeholder="最小" />
+              <span className="filter-range-separator" aria-hidden="true">-</span>
+              <InputNumber id="filter-consecutive-weeks-max" min={0} precision={0} value={draft.consecutiveWeekCountMax} onChange={(value) => setDraft((prev) => ({ ...prev, consecutiveWeekCountMax: value === null ? undefined : Number(value) }))} placeholder="最大" />
+            </div>
           </div>
-          <div className="filter-field">
-            <label htmlFor="filter-consecutive-weeks">连续上榜周数 ≥</label>
-            <InputNumber id="filter-consecutive-weeks" min={0} precision={0} value={draft.consecutiveWeekCountMin} onChange={(value) => setDraft((prev) => ({ ...prev, consecutiveWeekCountMin: value === null ? undefined : Number(value) }))} placeholder="输入周数" />
+          <div className="filter-field filter-field-range filter-field-second-row">
+            <label htmlFor="filter-buyer-median-min">最新支付买家数</label>
+            <div className="filter-range-control">
+              <InputNumber id="filter-buyer-median-min" min={0} precision={0} value={draft.latestBuyerMedianMin} onChange={(value) => setDraft((prev) => ({ ...prev, latestBuyerMedianMin: value === null ? undefined : Number(value) }))} placeholder="最小" />
+              <span className="filter-range-separator" aria-hidden="true">-</span>
+              <InputNumber id="filter-buyer-median-max" min={0} precision={0} value={draft.latestBuyerMedianMax} onChange={(value) => setDraft((prev) => ({ ...prev, latestBuyerMedianMax: value === null ? undefined : Number(value) }))} placeholder="最大" />
+            </div>
           </div>
-          <div className="filter-field filter-field-ai-status">
-            <label htmlFor="filter-ai-status">数据获取状态</label>
+          <div className="filter-field filter-field-ai-status filter-field-second-row">
+            <label htmlFor="filter-ai-status">数据状态</label>
             <Select
               id="filter-ai-status"
               allowClear
@@ -377,17 +405,17 @@ export function ProductsPage() {
             />
           </div>
           {isAdmin && teamFavoritesMode ? (
-            <div className="filter-field filter-field-favorites">
+            <div className="filter-field filter-field-favorites filter-field-second-row">
               <label htmlFor="filter-member-keyword">收藏成员</label>
               <Input id="filter-member-keyword" allowClear value={memberKeyword} onChange={(event) => { setMemberKeyword(event.target.value); setPage(1); }} placeholder="姓名 / 账号 / 部门" />
             </div>
           ) : (
-            <div className="filter-field filter-field-favorites">
+            <div className="filter-field filter-field-favorites filter-field-second-row">
               <label htmlFor="filter-favorites">收藏范围</label>
               <Checkbox id="filter-favorites" checked={draft.favoritesOnly ?? false} onChange={(event) => setDraft((prev) => ({ ...prev, favoritesOnly: event.target.checked || undefined }))}>仅看我的收藏</Checkbox>
             </div>
           )}
-          <Space className="filter-actions"><Button type="primary" onClick={applyFilters}>查询</Button><Button onClick={resetFilters}>重置</Button></Space>
+          <Space className="filter-actions filter-field-second-row"><Button type="primary" onClick={applyFilters}>查询</Button><Button onClick={resetFilters}>重置</Button></Space>
         </div>
       </Card>
 
@@ -407,7 +435,7 @@ export function ProductsPage() {
               <Button type="primary" icon={<CloudDownloadOutlined />} disabled={!selectedProductIds.length || creatingTask} loading={creatingTask} onClick={() => void startAiMetrics()}>获取更多数据</Button>
               <div className="bulk-ai-meta">
                 <Typography.Text strong>已选 {selectedProductIds.length} 件</Typography.Text>
-                <Typography.Text type="secondary">可跨页保留选择；后台自动按每批50件执行</Typography.Text>
+                <Typography.Text type="secondary">跨页选择；按每批50件执行</Typography.Text>
               </div>
               <Button type="link" disabled={!selectedProductIds.length || creatingTask} onClick={() => setSelectedProductIds([])}>清空选择</Button>
             </div>
@@ -426,7 +454,7 @@ export function ProductsPage() {
                 setPageSize(nextSize);
               }}
             />
-            <Tag color="blue">共 {data?.total ?? 0} 件</Tag>
+            <Tag color="blue">共 {data?.total ?? 0} 条</Tag>
           </div>
         </div>
         <div className="products-table-scroll" ref={tableWrapperRef}>
@@ -436,9 +464,16 @@ export function ProductsPage() {
             dataSource={data?.items ?? []}
             rowSelection={isAdmin ? {
               fixed: true,
+              columnWidth: 48,
               selectedRowKeys: selectedProductIds,
               preserveSelectedRowKeys: true,
               onChange: (keys) => setSelectedProductIds(keys.map(String)),
+              renderCell: (_checked, _record, index, originNode) => (
+                <div className="product-row-selection-cell">
+                  {originNode}
+                  <span className="product-row-index">{index + 1}</span>
+                </div>
+              ),
             } : undefined}
             loading={activeQuery.isLoading || activeQuery.isFetching}
             scroll={{ x: teamFavoritesMode && isAdmin ? 1950 : 1800, y: "calc(100vh - 390px)" }}
