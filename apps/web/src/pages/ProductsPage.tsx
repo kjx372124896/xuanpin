@@ -177,6 +177,7 @@ export function ProductsPage() {
   const [teamFavoritesMode, setTeamFavoritesMode] = useState(false);
   const [memberKeyword, setMemberKeyword] = useState("");
   const [creatingTask, setCreatingTask] = useState(false);
+  const [tableScrollY, setTableScrollY] = useState(400);
   const tableWrapperRef = useRef<HTMLDivElement>(null);
   const queryClient = useQueryClient();
   const navigate = useNavigate();
@@ -213,6 +214,24 @@ export function ProductsPage() {
     const tableBody = tableWrapperRef.current?.querySelector<HTMLElement>(".ant-table-body");
     if (tableBody) tableBody.scrollTop = 0;
   }, [page, pageSize, teamFavoritesMode]);
+
+  // 根据列表滚动容器的实际高度计算表格 body 高度，避免固定视口减法在不同窗口尺寸下留下底部空白。
+  useEffect(() => {
+    const container = tableWrapperRef.current;
+    if (!container) return;
+
+    const updateTableHeight = () => {
+      const header = container.querySelector<HTMLElement>(".ant-table-thead");
+      const headerHeight = header?.getBoundingClientRect().height ?? 44;
+      const nextHeight = Math.max(160, Math.floor(container.clientHeight - headerHeight - 2));
+      setTableScrollY((current) => current === nextHeight ? current : nextHeight);
+    };
+
+    updateTableHeight();
+    const observer = new ResizeObserver(updateTableHeight);
+    observer.observe(container);
+    return () => observer.disconnect();
+  }, []);
 
   const columns: ColumnsType<ProductTableRow> = [
     {
@@ -476,7 +495,7 @@ export function ProductsPage() {
               ),
             } : undefined}
             loading={activeQuery.isLoading || activeQuery.isFetching}
-            scroll={{ x: teamFavoritesMode && isAdmin ? 1950 : 1800, y: "calc(100vh - 390px)" }}
+            scroll={{ x: teamFavoritesMode && isAdmin ? 1950 : 1800, y: tableScrollY }}
             size="middle"
             locale={{ emptyText: <Empty description="暂无商品数据，请先导入生意参谋 Excel 榜单" /> }}
             pagination={false}
