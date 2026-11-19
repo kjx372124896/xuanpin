@@ -237,7 +237,7 @@ export function ProductsPage() {
 
   const columns: ColumnsType<ProductTableRow> = [
     {
-      title: "商品", dataIndex: "productName", key: "productName", width: 288, fixed: "left",
+      title: "商品", dataIndex: "productName", key: "productName", width: 360, fixed: "left",
       render: (_value, item) => (
         <div className="product-cell">
           <Image
@@ -507,7 +507,7 @@ export function ProductsPage() {
               ),
             } : undefined}
             loading={activeQuery.isLoading || activeQuery.isFetching}
-            scroll={{ x: teamFavoritesMode && isAdmin ? 1950 : 1800, y: tableScrollY }}
+            scroll={{ x: teamFavoritesMode && isAdmin ? 2022 : 1872, y: tableScrollY }}
             size="middle"
             locale={{ emptyText: <Empty description="暂无商品数据，请先导入生意参谋 Excel 榜单" /> }}
             pagination={false}
