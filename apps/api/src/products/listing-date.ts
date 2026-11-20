@@ -1,11 +1,11 @@
-const BASE_PRODUCT_ID = 1_052_407_159_281n;
-const PRODUCT_ID_STEP = 300_000_000n;
-const BASE_DATE_UTC = Date.UTC(2026, 4, 24);
+const BASE_PRODUCT_ID = 1_070_000_000_000n;
+const PRODUCT_ID_STEP = 278_550_000n;
+const BASE_DATE_UTC = Date.UTC(2026, 6, 29);
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 /**
- * 根据商品ID估算上架日期，严格遵循 WPS ROUND 的四舍五入规则（负数半值远离0）。
- * 等价于：DATE(2026,5,24)+ROUND((VALUE(商品ID)-1052407159281)/300000000,0)
+ * 根据商品ID估算上架日期，严格遵循 Excel ROUND 的四舍五入规则（负数半值远离0）。
+ * 等价于：DATE(2026,7,29)+ROUND((VALUE(商品ID)-1070000000000)/278550000,0)
  */
 export function calculateListingDate(productId: string | number | null | undefined): string | null {
   if (productId === null || productId === undefined) return null;

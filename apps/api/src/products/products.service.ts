@@ -116,7 +116,7 @@ export class ProductsService {
     return [...matchingProductIds];
   }
 
-  /** 按商品ID推算出的上架日期筛选；SQL ROUND 与 WPS ROUND 一样按半值远离0取整。 */
+  /** 按商品ID推算出的上架日期筛选；SQL ROUND 与 Excel ROUND 一样按半值远离0取整。 */
   private async findProductIdsByListingDateRange(fromValue?: string, toValue?: string): Promise<string[] | undefined> {
     const normalizeDate = (value?: string) => {
       if (value === undefined || value === "") return undefined;
@@ -132,13 +132,13 @@ export class ProductsService {
     if (!from && !to) return undefined;
     if (from && to && from > to) throw new BadRequestException("上架日期范围的开始日期不能晚于结束日期。");
 
-    const listingDayOffset = Prisma.sql`ROUND((p."商品ID"::numeric - 1052407159281::numeric) / 300000000::numeric)`;
+    const listingDayOffset = Prisma.sql`ROUND((p."商品ID"::numeric - 1070000000000::numeric) / 278550000::numeric)`;
     const rows = await this.prisma.$queryRaw<Array<{ productId: string }>>(Prisma.sql`
       SELECT p."商品ID" AS "productId"
       FROM "商品主表" p
       WHERE p."商品ID" ~ '^[0-9]+$'
-      ${from ? Prisma.sql`AND ${listingDayOffset} >= (${from}::date - DATE '2026-05-24')` : Prisma.empty}
-      ${to ? Prisma.sql`AND ${listingDayOffset} <= (${to}::date - DATE '2026-05-24')` : Prisma.empty}
+      ${from ? Prisma.sql`AND ${listingDayOffset} >= (${from}::date - DATE '2026-07-29')` : Prisma.empty}
+      ${to ? Prisma.sql`AND ${listingDayOffset} <= (${to}::date - DATE '2026-07-29')` : Prisma.empty}
     `);
     return rows.map((row) => row.productId);
   }
