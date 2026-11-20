@@ -81,6 +81,14 @@ export class AdminService {
     return this.prisma.ipWhitelist.findMany({ orderBy: [{ enabled: "desc" }, { createdAt: "desc" }] });
   }
 
+  async getIpWhitelistSetting() {
+    return { enabled: await this.ipService.isWhitelistEnabled() };
+  }
+
+  async updateIpWhitelistSetting(enabled: boolean) {
+    return this.ipService.setWhitelistEnabled(enabled);
+  }
+
   async createIpRule(cidr: string, label: string, enabled = true) {
     const normalized = this.ipService.normalizeCidr(cidr);
     return this.prisma.ipWhitelist.create({ data: { cidr: normalized, label: label.trim(), enabled } });

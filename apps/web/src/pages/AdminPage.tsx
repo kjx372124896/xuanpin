@@ -9,6 +9,7 @@ import { api, errorMessage } from "../api";
 
 interface UserRow { id: string; username: string; name: string; employeeNo: string | null; department: string | null; role: string; employmentStatus: string; accountStatus: string; canImport: boolean; createdAt: string }
 interface IpRule { id: string; cidr: string; label: string; enabled: boolean; createdAt: string; updatedAt: string }
+interface IpWhitelistSetting { enabled: boolean }
 
 const roleLabel: Record<string, string> = { SUPER_ADMIN: "超级管理员", ADMIN: "管理员", EMPLOYEE: "普通员工" };
 const employmentLabel: Record<string, string> = { ACTIVE: "在职", RESIGNED: "离职", SUSPENDED: "停用" };
@@ -21,6 +22,7 @@ export function AdminPage() {
   const [resetUser, setResetUser] = useState<UserRow | null>(null);
   const [ipModal, setIpModal] = useState(false);
   const [editingIp, setEditingIp] = useState<IpRule | null>(null);
+  const [ipWhitelistUpdating, setIpWhitelistUpdating] = useState(false);
   const [userForm] = Form.useForm();
   const [ipForm] = Form.useForm();
   const [passwordForm] = Form.useForm();
@@ -28,9 +30,27 @@ export function AdminPage() {
 
   const usersQuery = useQuery({ queryKey: ["adminUsers"], queryFn: async () => (await api.get<UserRow[]>("/admin/users")).data });
   const ipsQuery = useQuery({ queryKey: ["adminIps"], queryFn: async () => (await api.get<IpRule[]>("/admin/ip-rules")).data });
+  const ipWhitelistSettingQuery = useQuery({ queryKey: ["adminIpWhitelistSetting"], queryFn: async () => (await api.get<IpWhitelistSetting>("/admin/ip-whitelist-setting")).data });
 
   function refreshUsers() { void queryClient.invalidateQueries({ queryKey: ["adminUsers"] }); }
   function refreshIps() { void queryClient.invalidateQueries({ queryKey: ["adminIps"] }); }
+
+  async function toggleIpWhitelist(enabled: boolean) {
+    const previous = ipWhitelistSettingQuery.data?.enabled ?? true;
+    setIpWhitelistUpdating(true);
+    queryClient.setQueryData<IpWhitelistSetting>(["adminIpWhitelistSetting"], { enabled });
+    try {
+      const { data } = await api.patch<IpWhitelistSetting>("/admin/ip-whitelist-setting", { enabled });
+      queryClient.setQueryData(["adminIpWhitelistSetting"], data);
+      message.success(enabled ? "IP 白名单限制已开启" : "IP 白名单限制已关闭，普通员工可从任意 IP 访问");
+    } catch (error) {
+      queryClient.setQueryData<IpWhitelistSetting>(["adminIpWhitelistSetting"], { enabled: previous });
+      message.error(errorMessage(error));
+      await ipWhitelistSettingQuery.refetch();
+    } finally {
+      setIpWhitelistUpdating(false);
+    }
+  }
 
   async function saveUser(values: Record<string, unknown>) {
     try {
@@ -102,7 +122,7 @@ export function AdminPage() {
       <AlertText />
       <Tabs items={[
         { key: "users", label: "员工账号", children: <Card bordered={false} className="table-card"><div className="table-heading"><div><Typography.Title level={4}>员工账号管理</Typography.Title><Typography.Text type="secondary">员工必须保持在职且账号正常，才能登录系统。</Typography.Text></div><Button type="primary" icon={<PlusOutlined />} onClick={openCreateUser}>新增员工</Button></div><Table<UserRow> rowKey="id" loading={usersQuery.isLoading} columns={userColumns} dataSource={usersQuery.data ?? []} scroll={{ x: 1100 }} pagination={{ pageSize: 10, showSizeChanger: false }} /></Card> },
-        { key: "ips", label: "IP 白名单", children: <Card bordered={false} className="table-card"><div className="table-heading"><div><Typography.Title level={4}>普通员工 IP 白名单</Typography.Title><Typography.Text type="secondary">普通员工必须从已启用的 IP 或 CIDR 网段访问；管理员不受白名单限制。</Typography.Text></div><Button type="primary" icon={<PlusOutlined />} onClick={openCreateIp}>添加 IP 规则</Button></div><Table<IpRule> rowKey="id" loading={ipsQuery.isLoading} columns={ipColumns} dataSource={ipsQuery.data ?? []} pagination={{ pageSize: 10, showSizeChanger: false }} /></Card> },
+        { key: "ips", label: "IP 白名单", children: <Card bordered={false} className="table-card"><div className="table-heading"><div><Typography.Title level={4}>普通员工 IP 白名单</Typography.Title><Typography.Text type="secondary">管理员始终不受白名单限制；关闭总开关后，普通员工可从任意 IP 登录和访问系统。</Typography.Text></div><Button type="primary" icon={<PlusOutlined />} onClick={openCreateIp}>添加 IP 规则</Button></div><div className="table-heading" style={{ marginBottom: 16, padding: 16, border: "1px solid #f0f0f0", borderRadius: 8 }}><div><Typography.Text strong>IP 白名单限制</Typography.Text><br /><Typography.Text type="secondary">{ipWhitelistSettingQuery.data?.enabled === false ? "已关闭：普通员工可从任意 IP 访问" : "已开启：普通员工仅可从已启用的 IP / 网段访问"}</Typography.Text></div><Switch checked={ipWhitelistSettingQuery.data?.enabled ?? true} loading={ipWhitelistSettingQuery.isLoading || ipWhitelistSettingQuery.isFetching || ipWhitelistUpdating} disabled={ipWhitelistSettingQuery.isLoading || ipWhitelistSettingQuery.isError || ipWhitelistUpdating} checkedChildren="开启" unCheckedChildren="关闭" onChange={(checked) => void toggleIpWhitelist(checked)} /></div>{ipWhitelistSettingQuery.isError && <Typography.Text type="danger">白名单设置读取失败，服务端将按开启状态执行，请刷新页面或检查服务器。</Typography.Text>}<Table<IpRule> rowKey="id" loading={ipsQuery.isLoading} columns={ipColumns} dataSource={ipsQuery.data ?? []} pagination={{ pageSize: 10, showSizeChanger: false }} /></Card> },
       ]} />
 
       <Modal title={editingUser ? "编辑员工账号" : "新增员工账号"} open={userModal} onCancel={() => { setUserModal(false); setEditingUser(null); }} onOk={() => userForm.submit()} okText="保存" cancelText="取消" destroyOnHidden>
@@ -133,5 +153,5 @@ export function AdminPage() {
 }
 
 function AlertText() {
-  return <div className="admin-note"><Typography.Text>管理员账号不受 IP 白名单限制。普通员工只有在职且来源 IP 命中启用规则时，才能登录和访问数据。</Typography.Text></div>;
+  return <div className="admin-note"><Typography.Text>管理员账号始终不受 IP 白名单限制。普通员工是否限制来源 IP，由「IP 白名单」页签中的全局开关控制。</Typography.Text></div>;
 }

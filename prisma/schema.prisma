@@ -264,6 +264,14 @@ model IpWhitelist {
   @@map("公司IP白名单表")
 }
 
+model IpWhitelistSetting {
+  id        Int      @id @default(1) @map("配置ID")
+  enabled   Boolean  @default(true) @map("是否启用")
+  updatedAt DateTime @updatedAt @map("更新时间")
+
+  @@map("IP白名单设置表")
+}
+
 model DmpCredential {
   id               String    @id @default(cuid()) @map("授权ID") @db.VarChar(30)
   userId           String    @unique @map("用户ID") @db.VarChar(30)

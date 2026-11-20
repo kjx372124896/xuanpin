@@ -6,6 +6,29 @@ import { PrismaService } from "../prisma/prisma.service";
 export class IpService {
   constructor(private readonly prisma: PrismaService) {}
 
+  async isWhitelistEnabled(): Promise<boolean> {
+    try {
+      const setting = await this.prisma.ipWhitelistSetting.findUnique({
+        where: { id: 1 },
+        select: { enabled: true },
+      });
+      // 未初始化配置时保持原有的白名单限制，避免意外放开员工访问。
+      return setting?.enabled ?? true;
+    } catch {
+      // 配置读取异常时按开启处理，始终 fail closed。
+      return true;
+    }
+  }
+
+  async setWhitelistEnabled(enabled: boolean) {
+    return this.prisma.ipWhitelistSetting.upsert({
+      where: { id: 1 },
+      create: { id: 1, enabled },
+      update: { enabled },
+      select: { enabled: true, updatedAt: true },
+    });
+  }
+
   async isAllowed(rawIp: string | undefined | null): Promise<boolean> {
     if (!rawIp) return false;
     let address: ipaddr.IPv4 | ipaddr.IPv6;
@@ -26,6 +49,7 @@ export class IpService {
   }
 
   async assertEmployeeIp(rawIp: string | undefined | null) {
+    if (!(await this.isWhitelistEnabled())) return;
     if (!(await this.isAllowed(rawIp))) {
       throw new ForbiddenException("当前网络 IP 不在允许范围内，请联系管理员配置白名单。");
     }

@@ -39,6 +39,10 @@ class UpdateIpRuleDto {
   @IsOptional() @IsBoolean() enabled?: boolean;
 }
 
+class UpdateIpWhitelistSettingDto {
+  @IsBoolean() enabled!: boolean;
+}
+
 @Roles("SUPER_ADMIN", "ADMIN")
 @Controller("admin")
 export class AdminController {
@@ -50,6 +54,8 @@ export class AdminController {
   @Post("users/:id/reset-password") resetPassword(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Body() dto: ResetPasswordDto) { return this.adminService.resetPassword(req.user, id, dto.password); }
 
   @Get("ip-rules") listIpRules() { return this.adminService.listIpRules(); }
+  @Get("ip-whitelist-setting") getIpWhitelistSetting() { return this.adminService.getIpWhitelistSetting(); }
+  @Patch("ip-whitelist-setting") updateIpWhitelistSetting(@Body() dto: UpdateIpWhitelistSettingDto) { return this.adminService.updateIpWhitelistSetting(dto.enabled); }
   @Post("ip-rules") createIpRule(@Body() dto: IpRuleDto) { return this.adminService.createIpRule(dto.cidr, dto.label, dto.enabled ?? true); }
   @Patch("ip-rules/:id") updateIpRule(@Param("id") id: string, @Body() dto: UpdateIpRuleDto) { return this.adminService.updateIpRule(id, dto); }
   @Delete("ip-rules/:id") deleteIpRule(@Param("id") id: string) { return this.adminService.deleteIpRule(id); }
