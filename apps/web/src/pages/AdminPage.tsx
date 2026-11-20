@@ -1,15 +1,14 @@
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Button, Card, Form, Input, Modal, Popconfirm, Select, Space, Switch, Table, Tabs, Tag, Typography, message } from "antd";
-import { DeleteOutlined, EditOutlined, PlusOutlined, KeyOutlined } from "@ant-design/icons";
+import { Button, Card, Form, Input, Modal, Select, Space, Switch, Table, Tabs, Tag, Typography, message } from "antd";
+import { EditOutlined, PlusOutlined, KeyOutlined } from "@ant-design/icons";
 import type { ColumnsType } from "antd/es/table";
 import dayjs from "dayjs";
 import { useAuth } from "../auth/AuthContext";
 import { api, errorMessage } from "../api";
+import { DeviceManagementPanel } from "./DeviceManagementPanel";
 
 interface UserRow { id: string; username: string; name: string; employeeNo: string | null; department: string | null; role: string; employmentStatus: string; accountStatus: string; canImport: boolean; createdAt: string }
-interface IpRule { id: string; cidr: string; label: string; enabled: boolean; createdAt: string; updatedAt: string }
-interface IpWhitelistSetting { enabled: boolean }
 
 const roleLabel: Record<string, string> = { SUPER_ADMIN: "超级管理员", ADMIN: "管理员", EMPLOYEE: "普通员工" };
 const employmentLabel: Record<string, string> = { ACTIVE: "在职", RESIGNED: "离职", SUSPENDED: "停用" };
@@ -20,37 +19,13 @@ export function AdminPage() {
   const [userModal, setUserModal] = useState(false);
   const [editingUser, setEditingUser] = useState<UserRow | null>(null);
   const [resetUser, setResetUser] = useState<UserRow | null>(null);
-  const [ipModal, setIpModal] = useState(false);
-  const [editingIp, setEditingIp] = useState<IpRule | null>(null);
-  const [ipWhitelistUpdating, setIpWhitelistUpdating] = useState(false);
   const [userForm] = Form.useForm();
-  const [ipForm] = Form.useForm();
   const [passwordForm] = Form.useForm();
   const isSuperAdmin = currentUser?.role === "SUPER_ADMIN";
 
   const usersQuery = useQuery({ queryKey: ["adminUsers"], queryFn: async () => (await api.get<UserRow[]>("/admin/users")).data });
-  const ipsQuery = useQuery({ queryKey: ["adminIps"], queryFn: async () => (await api.get<IpRule[]>("/admin/ip-rules")).data });
-  const ipWhitelistSettingQuery = useQuery({ queryKey: ["adminIpWhitelistSetting"], queryFn: async () => (await api.get<IpWhitelistSetting>("/admin/ip-whitelist-setting")).data });
 
   function refreshUsers() { void queryClient.invalidateQueries({ queryKey: ["adminUsers"] }); }
-  function refreshIps() { void queryClient.invalidateQueries({ queryKey: ["adminIps"] }); }
-
-  async function toggleIpWhitelist(enabled: boolean) {
-    const previous = ipWhitelistSettingQuery.data?.enabled ?? true;
-    setIpWhitelistUpdating(true);
-    queryClient.setQueryData<IpWhitelistSetting>(["adminIpWhitelistSetting"], { enabled });
-    try {
-      const { data } = await api.patch<IpWhitelistSetting>("/admin/ip-whitelist-setting", { enabled });
-      queryClient.setQueryData(["adminIpWhitelistSetting"], data);
-      message.success(enabled ? "IP 白名单限制已开启" : "IP 白名单限制已关闭，普通员工可从任意 IP 访问");
-    } catch (error) {
-      queryClient.setQueryData<IpWhitelistSetting>(["adminIpWhitelistSetting"], { enabled: previous });
-      message.error(errorMessage(error));
-      await ipWhitelistSettingQuery.refetch();
-    } finally {
-      setIpWhitelistUpdating(false);
-    }
-  }
 
   async function saveUser(values: Record<string, unknown>) {
     try {
@@ -76,27 +51,6 @@ export function AdminPage() {
     catch (error) { message.error(errorMessage(error)); }
   }
 
-  async function saveIp(values: { cidr: string; label: string; enabled?: boolean }) {
-    try {
-      if (editingIp) await api.patch(`/admin/ip-rules/${editingIp.id}`, values);
-      else await api.post("/admin/ip-rules", values);
-      message.success(editingIp ? "IP 规则已更新" : "IP 规则已添加"); setIpModal(false); setEditingIp(null); ipForm.resetFields(); refreshIps();
-    } catch (error) { message.error(errorMessage(error)); }
-  }
-
-  function openCreateIp() { setEditingIp(null); ipForm.resetFields(); ipForm.setFieldsValue({ enabled: true }); setIpModal(true); }
-  function openEditIp(row: IpRule) { setEditingIp(row); ipForm.setFieldsValue(row); setIpModal(true); }
-
-  async function toggleIp(row: IpRule, enabled: boolean) {
-    try { await api.patch(`/admin/ip-rules/${row.id}`, { enabled }); refreshIps(); }
-    catch (error) { message.error(errorMessage(error)); }
-  }
-
-  async function deleteIp(id: string) {
-    try { await api.delete(`/admin/ip-rules/${id}`); message.success("IP 规则已删除"); refreshIps(); }
-    catch (error) { message.error(errorMessage(error)); }
-  }
-
   const userColumns: ColumnsType<UserRow> = [
     { title: "员工", key: "employee", render: (_value, row) => <div><div className="admin-user-name">{row.name}</div><Typography.Text type="secondary">{row.username} · {row.employeeNo || "无员工编号"}</Typography.Text></div> },
     { title: "部门", dataIndex: "department", key: "department", width: 130, render: (value) => value || "—" },
@@ -108,21 +62,12 @@ export function AdminPage() {
     { title: "操作", key: "action", fixed: "right", width: 170, render: (_value, row) => isSuperAdmin || row.role === "EMPLOYEE" ? <Space size={4}><Button size="small" icon={<EditOutlined />} onClick={() => openEditUser(row)}>编辑</Button><Button size="small" icon={<KeyOutlined />} onClick={() => setResetUser(row)}>重置密码</Button></Space> : <Typography.Text type="secondary">仅超级管理员可管理</Typography.Text> },
   ];
 
-  const ipColumns: ColumnsType<IpRule> = [
-    { title: "允许访问的 IP / 网段", dataIndex: "cidr", key: "cidr", width: 240, render: (value) => <Typography.Text code>{value}</Typography.Text> },
-    { title: "备注", dataIndex: "label", key: "label" },
-    { title: "状态", dataIndex: "enabled", key: "enabled", width: 100, render: (value, row) => <Switch checked={value} checkedChildren="启用" unCheckedChildren="停用" onChange={(checked) => void toggleIp(row, checked)} /> },
-    { title: "添加时间", dataIndex: "createdAt", key: "created", width: 160, render: (value) => dayjs(value).format("YYYY-MM-DD HH:mm") },
-    { title: "操作", key: "action", width: 120, render: (_value, row) => <Space><Button size="small" icon={<EditOutlined />} onClick={() => openEditIp(row)}>编辑</Button><Popconfirm title="确定删除这条 IP 规则？" onConfirm={() => void deleteIp(row.id)}><Button danger size="small" icon={<DeleteOutlined />} /></Popconfirm></Space> },
-  ];
-
   return (
     <div className="page-stack">
-      <div className="page-heading-row"><div><div className="eyebrow">ADMINISTRATION</div><Typography.Title level={2}>管理员设置</Typography.Title><Typography.Text type="secondary">维护员工账号和普通员工访问 IP 白名单。</Typography.Text></div><Tag color="purple">{roleLabel[currentUser?.role ?? "ADMIN"]}</Tag></div>
-      <AlertText />
+      <div className="page-heading-row"><div><div className="eyebrow">ADMINISTRATION</div><Typography.Title level={2}>管理员设置</Typography.Title><Typography.Text type="secondary">维护员工账号、设备绑定和设备更换审批。</Typography.Text></div><Tag color="purple">{roleLabel[currentUser?.role ?? "ADMIN"]}</Tag></div>
       <Tabs items={[
         { key: "users", label: "员工账号", children: <Card bordered={false} className="table-card"><div className="table-heading"><div><Typography.Title level={4}>员工账号管理</Typography.Title><Typography.Text type="secondary">员工必须保持在职且账号正常，才能登录系统。</Typography.Text></div><Button type="primary" icon={<PlusOutlined />} onClick={openCreateUser}>新增员工</Button></div><Table<UserRow> rowKey="id" loading={usersQuery.isLoading} columns={userColumns} dataSource={usersQuery.data ?? []} scroll={{ x: 1100 }} pagination={{ pageSize: 10, showSizeChanger: false }} /></Card> },
-        { key: "ips", label: "IP 白名单", children: <Card bordered={false} className="table-card"><div className="table-heading"><div><Typography.Title level={4}>普通员工 IP 白名单</Typography.Title><Typography.Text type="secondary">管理员始终不受白名单限制；关闭总开关后，普通员工可从任意 IP 登录和访问系统。</Typography.Text></div><Button type="primary" icon={<PlusOutlined />} onClick={openCreateIp}>添加 IP 规则</Button></div><div className="table-heading" style={{ marginBottom: 16, padding: 16, border: "1px solid #f0f0f0", borderRadius: 8 }}><div><Typography.Text strong>IP 白名单限制</Typography.Text><br /><Typography.Text type="secondary">{ipWhitelistSettingQuery.data?.enabled === false ? "已关闭：普通员工可从任意 IP 访问" : "已开启：普通员工仅可从已启用的 IP / 网段访问"}</Typography.Text></div><Switch checked={ipWhitelistSettingQuery.data?.enabled ?? true} loading={ipWhitelistSettingQuery.isLoading || ipWhitelistSettingQuery.isFetching || ipWhitelistUpdating} disabled={ipWhitelistSettingQuery.isLoading || ipWhitelistSettingQuery.isError || ipWhitelistUpdating} checkedChildren="开启" unCheckedChildren="关闭" onChange={(checked) => void toggleIpWhitelist(checked)} /></div>{ipWhitelistSettingQuery.isError && <Typography.Text type="danger">白名单设置读取失败，服务端将按开启状态执行，请刷新页面或检查服务器。</Typography.Text>}<Table<IpRule> rowKey="id" loading={ipsQuery.isLoading} columns={ipColumns} dataSource={ipsQuery.data ?? []} pagination={{ pageSize: 10, showSizeChanger: false }} /></Card> },
+        { key: "devices", label: "设备管理", children: <DeviceManagementPanel /> },
       ]} />
 
       <Modal title={editingUser ? "编辑员工账号" : "新增员工账号"} open={userModal} onCancel={() => { setUserModal(false); setEditingUser(null); }} onOk={() => userForm.submit()} okText="保存" cancelText="取消" destroyOnHidden>
@@ -141,17 +86,6 @@ export function AdminPage() {
         <Form form={passwordForm} layout="vertical" onFinish={resetPassword}><Form.Item name="password" label="新密码" rules={[{ required: true, min: 8, message: "密码至少 8 位" }]}><Input.Password placeholder="输入新密码，至少 8 位" /></Form.Item></Form>
       </Modal>
 
-      <Modal title={editingIp ? "编辑 IP 规则" : "添加 IP 规则"} open={ipModal} onCancel={() => { setIpModal(false); setEditingIp(null); }} onOk={() => ipForm.submit()} okText="保存" cancelText="取消" destroyOnHidden>
-        <Form form={ipForm} layout="vertical" onFinish={saveIp}>
-          <Form.Item name="cidr" label="IP 地址或 CIDR 网段" rules={[{ required: true, message: "请输入 IP 或网段" }]}><Input placeholder="例如：203.0.113.10 或 203.0.113.0/24" /></Form.Item>
-          <Form.Item name="label" label="备注" rules={[{ required: true, message: "请输入备注" }]}><Input placeholder="例如：总部办公室" /></Form.Item>
-          <Form.Item name="enabled" label="启用规则" valuePropName="checked"><Switch checkedChildren="启用" unCheckedChildren="停用" /></Form.Item>
-        </Form>
-      </Modal>
     </div>
   );
-}
-
-function AlertText() {
-  return <div className="admin-note"><Typography.Text>管理员账号始终不受 IP 白名单限制。普通员工是否限制来源 IP，由「IP 白名单」页签中的全局开关控制。</Typography.Text></div>;
 }

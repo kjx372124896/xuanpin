@@ -5,10 +5,14 @@ import { api } from "../api";
 interface AuthContextValue {
   user: SafeUser | null;
   loading: boolean;
-  login: (username: string, password: string) => Promise<SafeUser>;
+  login: (username: string, password: string) => Promise<LoginResult>;
   logout: () => Promise<void>;
   refresh: () => Promise<void>;
 }
+
+export type LoginResult =
+  | { status: "AUTHENTICATED"; user: SafeUser }
+  | { status: "PENDING_APPROVAL"; requestId: string };
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
@@ -31,9 +35,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const login = useCallback(async (username: string, password: string) => {
     const response = await api.post("/auth/login", { username, password });
-    const nextUser = response.data.user as SafeUser;
-    setUser(nextUser);
-    return nextUser;
+    const result = response.data as LoginResult;
+    if (result.status === "AUTHENTICATED") setUser(result.user);
+    else setUser(null);
+    return result;
   }, []);
 
   const logout = useCallback(async () => {

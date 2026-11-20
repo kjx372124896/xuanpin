@@ -3,16 +3,14 @@ import { Reflector } from "@nestjs/core";
 import { createHash } from "node:crypto";
 import { PrismaService } from "../prisma/prisma.service";
 import { IMPORT_KEY, PUBLIC_KEY, ROLES_KEY } from "./auth.decorators";
-import { IpService } from "./ip.service";
 import { toSafeUser, type AuthenticatedRequest } from "./request-user";
-import { normalizeClientIp } from "./client-ip";
+import { DEVICE_COOKIE_NAME, hashDeviceToken } from "./device-binding.service";
 
 @Injectable()
 export class AuthGuard implements CanActivate {
   constructor(
     private readonly reflector: Reflector,
     private readonly prisma: PrismaService,
-    private readonly ipService: IpService,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -33,7 +31,21 @@ export class AuthGuard implements CanActivate {
     if (user.accountStatus !== "ACTIVE" || user.employmentStatus !== "ACTIVE") {
       throw new UnauthorizedException("账号已停用或员工状态不是在职，请联系管理员。");
     }
-    if (user.role === "EMPLOYEE") await this.ipService.assertEmployeeIp(normalizeClientIp(request.ip ?? request.socket.remoteAddress));
+    const rawDeviceToken = request.cookies?.[DEVICE_COOKIE_NAME] as string | undefined;
+    if (!rawDeviceToken || !/^[a-f0-9]{64}$/i.test(rawDeviceToken)) {
+      throw new UnauthorizedException("当前浏览器缺少设备凭证，请重新登录并完成设备绑定。");
+    }
+    const deviceTokenHash = hashDeviceToken(rawDeviceToken);
+    if (!session.deviceTokenHash || session.deviceTokenHash !== deviceTokenHash) {
+      throw new UnauthorizedException("当前浏览器与登录会话不匹配，请重新登录。");
+    }
+    const binding = await this.prisma.userDeviceBinding.findUnique({
+      where: { userId: user.id },
+      select: { tokenHash: true },
+    });
+    if (!binding || binding.tokenHash !== deviceTokenHash) {
+      throw new UnauthorizedException("当前设备已解除绑定或被其他设备替换，请重新登录并申请绑定。");
+    }
 
     const requiredRoles = this.reflector.getAllAndOverride<string[]>(ROLES_KEY, [context.getHandler(), context.getClass()]);
     if (requiredRoles?.length && !requiredRoles.includes(user.role)) throw new ForbiddenException("没有权限访问此功能。");

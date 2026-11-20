@@ -123,6 +123,16 @@ a { color: #315efb; }
 .login-ip-value { color: #2f4770; font-size: 13px; font-weight: 650; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 .login-ip-hint { flex: 1 1 100%; color: #929daf; font-size: 10px; line-height: 1.5; }
 .login-card-foot { border-top: 1px solid #f0f2f6; padding-top: 17px; margin-top: 22px; text-align: center; color: #a0a9b8; font-size: 11px; }
+.login-device-hint { margin-top: 18px; padding: 12px 13px; border: 1px solid #e7edf7; border-radius: 10px; background: #f8faff; color: #71809a; font-size: 11px; line-height: 1.7; }
+.device-approval-page { min-height: 100vh; display: grid; place-items: center; padding: 28px 16px; background: radial-gradient(circle at 15% 10%,#edf3ff 0,transparent 34%),linear-gradient(145deg,#f7f9fd,#eef2f8); }
+.device-approval-card { width: min(100%,620px); border: 1px solid #e9eef6; border-radius: 18px; box-shadow: 0 22px 70px rgba(37,55,91,.09); }
+.device-approval-brand { padding-top: 8px; text-align: center; color: #314d7b; font-size: 15px; font-weight: 700; letter-spacing: .5px; }
+.device-approval-card .ant-result { padding: 34px 18px 20px; }
+.device-approval-card .ant-result-title { color: #273750; font-size: 22px; }
+.device-approval-card .ant-result-subtitle { max-width: 440px; margin: 0 auto; line-height: 1.9; }
+.device-approval-icon { font-size: 42px; line-height: 1.2; }
+.device-approval-time { display: block; padding: 0 20px 14px; text-align: center; font-size: 11px; }
+.device-approval-actions { display: flex; justify-content: center; align-items: center; gap: 8px; padding: 0 16px 22px; }
 .login-decoration { position: absolute; border-radius: 50%; filter: blur(1px); pointer-events: none; }
 .login-decoration-one { width: 520px; height: 520px; left: -260px; bottom: -300px; border: 1px solid rgba(255,255,255,.07); box-shadow: 0 0 0 50px rgba(255,255,255,.025),0 0 0 100px rgba(255,255,255,.018); }
 .login-decoration-two { width: 400px; height: 400px; right: -200px; top: -200px; background: rgba(49,94,251,.035); }

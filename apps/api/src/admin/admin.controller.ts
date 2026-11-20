@@ -3,6 +3,7 @@ import { IsBoolean, IsIn, IsOptional, IsString, MinLength } from "class-validato
 import { Roles } from "../auth/auth.decorators";
 import type { AuthenticatedRequest } from "../auth/request-user";
 import { AdminService } from "./admin.service";
+import { normalizeClientIp } from "../auth/client-ip";
 
 class CreateUserDto {
   @IsString() username!: string;
@@ -27,20 +28,8 @@ class ResetPasswordDto {
   @IsString() @MinLength(8) password!: string;
 }
 
-class IpRuleDto {
-  @IsString() cidr!: string;
-  @IsString() label!: string;
-  @IsOptional() @IsBoolean() enabled?: boolean;
-}
-
-class UpdateIpRuleDto {
-  @IsOptional() @IsString() cidr?: string;
-  @IsOptional() @IsString() label?: string;
-  @IsOptional() @IsBoolean() enabled?: boolean;
-}
-
-class UpdateIpWhitelistSettingDto {
-  @IsBoolean() enabled!: boolean;
+class DeviceReviewDto {
+  @IsOptional() @IsString() note?: string;
 }
 
 @Roles("SUPER_ADMIN", "ADMIN")
@@ -53,12 +42,18 @@ export class AdminController {
   @Patch("users/:id") updateUser(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Body() dto: UpdateUserDto) { return this.adminService.updateUser(req.user, id, dto); }
   @Post("users/:id/reset-password") resetPassword(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Body() dto: ResetPasswordDto) { return this.adminService.resetPassword(req.user, id, dto.password); }
 
-  @Get("ip-rules") listIpRules() { return this.adminService.listIpRules(); }
-  @Get("ip-whitelist-setting") getIpWhitelistSetting() { return this.adminService.getIpWhitelistSetting(); }
-  @Patch("ip-whitelist-setting") updateIpWhitelistSetting(@Body() dto: UpdateIpWhitelistSettingDto) { return this.adminService.updateIpWhitelistSetting(dto.enabled); }
-  @Post("ip-rules") createIpRule(@Body() dto: IpRuleDto) { return this.adminService.createIpRule(dto.cidr, dto.label, dto.enabled ?? true); }
-  @Patch("ip-rules/:id") updateIpRule(@Param("id") id: string, @Body() dto: UpdateIpRuleDto) { return this.adminService.updateIpRule(id, dto); }
-  @Delete("ip-rules/:id") deleteIpRule(@Param("id") id: string) { return this.adminService.deleteIpRule(id); }
+  @Get("devices") listDevices() { return this.adminService.listDevices(); }
+  @Get("device-requests") listDeviceRequests() { return this.adminService.listDeviceRequests(); }
+  @Get("device-audit-logs") listDeviceAuditLogs() { return this.adminService.listDeviceAuditLogs(); }
+  @Patch("device-requests/:id/approve") approveDeviceRequest(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Body() dto: DeviceReviewDto) {
+    return this.adminService.approveDeviceRequest(req.user, id, dto.note, normalizeClientIp(req.ip ?? req.socket.remoteAddress) ?? null);
+  }
+  @Patch("device-requests/:id/reject") rejectDeviceRequest(@Req() req: AuthenticatedRequest, @Param("id") id: string, @Body() dto: DeviceReviewDto) {
+    return this.adminService.rejectDeviceRequest(req.user, id, dto.note, normalizeClientIp(req.ip ?? req.socket.remoteAddress) ?? null);
+  }
+  @Delete("devices/:userId") unbindDevice(@Req() req: AuthenticatedRequest, @Param("userId") userId: string) {
+    return this.adminService.unbindDevice(req.user, userId, normalizeClientIp(req.ip ?? req.socket.remoteAddress) ?? null);
+  }
 
   @Get("imports") listImports() { return this.adminService.listImportBatches(); }
 }

@@ -4,6 +4,7 @@ import { Spin } from "antd";
 import { useAuth } from "./auth/AuthContext";
 import { AppLayout } from "./components/AppLayout";
 import { LoginPage } from "./pages/LoginPage";
+import { DeviceApprovalPage } from "./pages/DeviceApprovalPage";
 import { ProductsPage } from "./pages/ProductsPage";
 
 const AdminPage = lazy(() => import("./pages/AdminPage").then((module) => ({ default: module.AdminPage })));
@@ -34,6 +35,7 @@ export function App() {
   return (
     <Routes>
       <Route path="/login" element={user ? <Navigate to="/" replace /> : <LoginPage />} />
+      <Route path="/device-approval" element={<DeviceApprovalPage />} />
       <Route element={<RequireAuth />}>
         <Route element={<AppLayout />}>
           <Route index element={<ProductsPage />} />

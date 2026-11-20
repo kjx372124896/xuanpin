@@ -142,15 +142,15 @@ model ProductHistory {
 }
 
 model Category {
-  id                 String   @id @default(cuid()) @map("类目ID") @db.VarChar(30)
-  categoryName       String   @unique @map("类目名称") @db.VarChar(255)
-  categoryLevel1     String   @map("一级类目") @db.VarChar(255)
-  categoryLevel2     String?  @map("二级类目") @db.VarChar(255)
-  responsibleUserId  String?  @map("负责人ID") @db.VarChar(30)
-  enabled            Boolean  @default(true) @map("是否启用")
-  createdAt          DateTime @default(now()) @map("创建时间")
-  updatedAt          DateTime @updatedAt @map("更新时间")
-  responsibleUser    User?    @relation("CategoryResponsibleUser", fields: [responsibleUserId], references: [id], onDelete: SetNull)
+  id                String   @id @default(cuid()) @map("类目ID") @db.VarChar(30)
+  categoryName      String   @unique @map("类目名称") @db.VarChar(255)
+  categoryLevel1    String   @map("一级类目") @db.VarChar(255)
+  categoryLevel2    String?  @map("二级类目") @db.VarChar(255)
+  responsibleUserId String?  @map("负责人ID") @db.VarChar(30)
+  enabled           Boolean  @default(true) @map("是否启用")
+  createdAt         DateTime @default(now()) @map("创建时间")
+  updatedAt         DateTime @updatedAt @map("更新时间")
+  responsibleUser   User?    @relation("CategoryResponsibleUser", fields: [responsibleUserId], references: [id], onDelete: SetNull)
 
   @@index([categoryLevel1, categoryLevel2])
   @@index([responsibleUserId])
@@ -205,40 +205,102 @@ model ImportFile {
 }
 
 model User {
-  id                 String              @id @default(cuid()) @map("用户ID") @db.VarChar(30)
-  username           String              @unique @map("登录账号") @db.VarChar(80)
-  passwordHash       String              @map("密码哈希") @db.VarChar(255)
-  name               String              @map("员工姓名") @db.VarChar(100)
-  employeeNo         String?             @unique @map("员工编号") @db.VarChar(80)
-  department         String?             @map("所属部门") @db.VarChar(120)
-  role               UserRole            @default(EMPLOYEE) @map("用户角色")
-  employmentStatus   EmploymentStatus    @default(ACTIVE) @map("员工状态")
-  accountStatus      AccountStatus       @default(ACTIVE) @map("账号状态")
-  canImport          Boolean             @default(false) @map("允许导入")
-  createdAt          DateTime            @default(now()) @map("创建时间")
-  updatedAt          DateTime            @updatedAt @map("更新时间")
-  sessions           LoginSession[]
-  favorites          ProductFavorite[]
-  dmpCredential      DmpCredential?
-  dmpAiRuns          DmpAiRun[]
-  dmpExtensionLink   DmpExtensionLink?
-  dmpCollectionTasks DmpCollectionTask[] @relation("DmpCollectionTaskCreator")
-  assignedCategories Category[]          @relation("CategoryResponsibleUser")
+  id                           String                @id @default(cuid()) @map("用户ID") @db.VarChar(30)
+  username                     String                @unique @map("登录账号") @db.VarChar(80)
+  passwordHash                 String                @map("密码哈希") @db.VarChar(255)
+  name                         String                @map("员工姓名") @db.VarChar(100)
+  employeeNo                   String?               @unique @map("员工编号") @db.VarChar(80)
+  department                   String?               @map("所属部门") @db.VarChar(120)
+  role                         UserRole              @default(EMPLOYEE) @map("用户角色")
+  employmentStatus             EmploymentStatus      @default(ACTIVE) @map("员工状态")
+  accountStatus                AccountStatus         @default(ACTIVE) @map("账号状态")
+  canImport                    Boolean               @default(false) @map("允许导入")
+  createdAt                    DateTime              @default(now()) @map("创建时间")
+  updatedAt                    DateTime              @updatedAt @map("更新时间")
+  sessions                     LoginSession[]
+  deviceBinding                UserDeviceBinding?
+  deviceChangeRequests         DeviceChangeRequest[]
+  reviewedDeviceChangeRequests DeviceChangeRequest[] @relation("DeviceChangeReviewer")
+  deviceAuditLogs              DeviceAuditLog[]      @relation("DeviceAuditTarget")
+  actedDeviceAuditLogs         DeviceAuditLog[]      @relation("DeviceAuditActor")
+  favorites                    ProductFavorite[]
+  dmpCredential                DmpCredential?
+  dmpAiRuns                    DmpAiRun[]
+  dmpExtensionLink             DmpExtensionLink?
+  dmpCollectionTasks           DmpCollectionTask[]   @relation("DmpCollectionTaskCreator")
+  assignedCategories           Category[]            @relation("CategoryResponsibleUser")
 
   @@index([role, accountStatus, employmentStatus])
   @@map("系统用户表")
 }
 
 model LoginSession {
-  id        String   @id @default(cuid()) @map("会话ID") @db.VarChar(30)
-  userId    String   @map("用户ID") @db.VarChar(30)
-  tokenHash String   @unique @map("会话令牌哈希") @db.Char(64)
-  expiresAt DateTime @map("过期时间")
-  createdAt DateTime @default(now()) @map("创建时间")
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id              String   @id @default(cuid()) @map("会话ID") @db.VarChar(30)
+  userId          String   @map("用户ID") @db.VarChar(30)
+  tokenHash       String   @unique @map("会话令牌哈希") @db.Char(64)
+  deviceTokenHash String?  @map("设备令牌哈希") @db.Char(64)
+  expiresAt       DateTime @map("过期时间")
+  createdAt       DateTime @default(now()) @map("创建时间")
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId, expiresAt])
   @@map("登录会话表")
+}
+
+model UserDeviceBinding {
+  id              String   @id @default(cuid()) @map("设备绑定ID") @db.VarChar(30)
+  userId          String   @unique @map("用户ID") @db.VarChar(30)
+  tokenHash       String   @map("设备令牌哈希") @db.Char(64)
+  browserName     String   @map("浏览器名称") @db.VarChar(80)
+  browserVersion  String?  @map("浏览器版本") @db.VarChar(80)
+  operatingSystem String   @map("操作系统") @db.VarChar(80)
+  userAgent       String   @map("浏览器标识") @db.VarChar(500)
+  firstBoundAt    DateTime @default(now()) @map("首次绑定时间")
+  lastSeenAt      DateTime @default(now()) @map("最近使用时间")
+  lastLoginIp     String?  @map("最近登录IP") @db.VarChar(100)
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([tokenHash])
+  @@index([lastSeenAt])
+  @@map("用户设备绑定表")
+}
+
+model DeviceChangeRequest {
+  id              String    @id @default(cuid()) @map("申请ID") @db.VarChar(30)
+  userId          String    @map("用户ID") @db.VarChar(30)
+  tokenHash       String    @map("申请设备令牌哈希") @db.Char(64)
+  browserName     String    @map("浏览器名称") @db.VarChar(80)
+  browserVersion  String?   @map("浏览器版本") @db.VarChar(80)
+  operatingSystem String    @map("操作系统") @db.VarChar(80)
+  userAgent       String    @map("浏览器标识") @db.VarChar(500)
+  requestIp       String?   @map("申请IP") @db.VarChar(100)
+  status          String    @default("PENDING") @map("申请状态") @db.VarChar(20)
+  requestedAt     DateTime  @default(now()) @map("申请时间")
+  reviewedAt      DateTime? @map("审批时间")
+  reviewedById    String?   @map("审批管理员ID") @db.VarChar(30)
+  reviewNote      String?   @map("审批备注") @db.VarChar(500)
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  reviewedBy      User?     @relation("DeviceChangeReviewer", fields: [reviewedById], references: [id], onDelete: SetNull)
+
+  @@index([userId, status, requestedAt])
+  @@index([status, requestedAt])
+  @@map("设备更换申请表")
+}
+
+model DeviceAuditLog {
+  id          String   @id @default(cuid()) @map("日志ID") @db.VarChar(30)
+  userId      String   @map("目标用户ID") @db.VarChar(30)
+  actorUserId String?  @map("操作人ID") @db.VarChar(30)
+  action      String   @map("操作类型") @db.VarChar(40)
+  detailsJson String?  @map("操作详情") @db.Text
+  ip          String?  @map("操作IP") @db.VarChar(100)
+  createdAt   DateTime @default(now()) @map("操作时间")
+  user        User     @relation("DeviceAuditTarget", fields: [userId], references: [id], onDelete: Cascade)
+  actor       User?    @relation("DeviceAuditActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([userId, createdAt])
+  @@index([createdAt])
+  @@map("设备操作日志表")
 }
 
 model ProductFavorite {

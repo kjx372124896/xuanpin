@@ -1,10 +1,12 @@
-import { Body, Controller, Get, Post, Req, Res } from "@nestjs/common";
+import { Body, Controller, Get, Param, Post, Req, Res } from "@nestjs/common";
 import type { Request, Response } from "express";
 import { IsString, MinLength } from "class-validator";
 import { Public } from "./auth.decorators";
 import { AuthService } from "./auth.service";
 import type { AuthenticatedRequest } from "./request-user";
 import { normalizeClientIp } from "./client-ip";
+import { DEVICE_COOKIE_NAME } from "./device-binding.service";
+import { parseDeviceInfo } from "./device-info";
 
 class LoginDto {
   @IsString() username!: string;
@@ -16,23 +18,40 @@ export class AuthController {
   constructor(private readonly authService: AuthService) {}
 
   @Public()
-  @Get("client-ip")
-  clientIp(@Req() req: Request) {
-    return { ip: normalizeClientIp(req.ip ?? req.socket.remoteAddress) ?? null };
+  @Post("login")
+  async login(@Body() dto: LoginDto, @Req() req: Request, @Res({ passthrough: true }) res: Response) {
+    const result = await this.authService.login(
+      dto.username,
+      dto.password,
+      req.cookies?.[DEVICE_COOKIE_NAME] as string | undefined,
+      parseDeviceInfo(req.headers["user-agent"]),
+      normalizeClientIp(req.ip ?? req.socket.remoteAddress),
+    );
+    const cookieBase = {
+      httpOnly: true,
+      secure: process.env.COOKIE_SECURE === "true",
+      sameSite: "lax" as const,
+      path: "/",
+    };
+    res.cookie(DEVICE_COOKIE_NAME, result.deviceToken, {
+      ...cookieBase,
+      expires: result.deviceTokenExpiresAt,
+    });
+    if (result.status === "PENDING_APPROVAL") {
+      res.clearCookie("sid", cookieBase);
+      return { status: result.status, requestId: result.requestId };
+    }
+    res.cookie("sid", result.token, {
+      ...cookieBase,
+      expires: result.expiresAt,
+    });
+    return { status: result.status, user: result.user };
   }
 
   @Public()
-  @Post("login")
-  async login(@Body() dto: LoginDto, @Req() req: Request, @Res({ passthrough: true }) res: Response) {
-    const result = await this.authService.login(dto.username, dto.password, normalizeClientIp(req.ip ?? req.socket.remoteAddress));
-    res.cookie("sid", result.token, {
-      httpOnly: true,
-      secure: process.env.COOKIE_SECURE === "true",
-      sameSite: "lax",
-      path: "/",
-      expires: result.expiresAt,
-    });
-    return { user: result.user };
+  @Get("device-requests/:id/status")
+  deviceRequestStatus(@Param("id") id: string, @Req() req: Request) {
+    return this.authService.getDeviceRequestStatus(id, req.cookies?.[DEVICE_COOKIE_NAME] as string | undefined);
   }
 
   @Public()

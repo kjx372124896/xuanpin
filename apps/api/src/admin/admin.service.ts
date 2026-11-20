@@ -1,12 +1,12 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
 import * as bcrypt from "bcryptjs";
 import { PrismaService } from "../prisma/prisma.service";
-import { IpService } from "../auth/ip.service";
+import { DeviceBindingService } from "../auth/device-binding.service";
 import type { RequestUser } from "../auth/request-user";
 
 @Injectable()
 export class AdminService {
-  constructor(private readonly prisma: PrismaService, private readonly ipService: IpService) {}
+  constructor(private readonly prisma: PrismaService, private readonly deviceBindingService: DeviceBindingService) {}
 
   async listUsers() {
     return this.prisma.user.findMany({
@@ -77,38 +77,30 @@ export class AdminService {
     return { success: true };
   }
 
-  listIpRules() {
-    return this.prisma.ipWhitelist.findMany({ orderBy: [{ enabled: "desc" }, { createdAt: "desc" }] });
+  listDevices() { return this.deviceBindingService.listDevices(); }
+  listDeviceRequests() { return this.deviceBindingService.listRequests(); }
+  listDeviceAuditLogs() { return this.deviceBindingService.listAuditLogs(); }
+  async approveDeviceRequest(actor: RequestUser, id: string, note: string | undefined, ip: string | null) {
+    const request = await this.prisma.deviceChangeRequest.findUnique({ where: { id }, select: { user: { select: { role: true } } } });
+    if (request && actor.role !== "SUPER_ADMIN" && request.user.role !== "EMPLOYEE") {
+      throw new ForbiddenException("只有超级管理员可以审批管理员账号的设备更换申请。");
+    }
+    return this.deviceBindingService.approveRequest(id, actor.id, note, ip);
   }
-
-  async getIpWhitelistSetting() {
-    return { enabled: await this.ipService.isWhitelistEnabled() };
+  async rejectDeviceRequest(actor: RequestUser, id: string, note: string | undefined, ip: string | null) {
+    const request = await this.prisma.deviceChangeRequest.findUnique({ where: { id }, select: { user: { select: { role: true } } } });
+    if (request && actor.role !== "SUPER_ADMIN" && request.user.role !== "EMPLOYEE") {
+      throw new ForbiddenException("只有超级管理员可以处理管理员账号的设备更换申请。");
+    }
+    return this.deviceBindingService.rejectRequest(id, actor.id, note, ip);
   }
-
-  async updateIpWhitelistSetting(enabled: boolean) {
-    return this.ipService.setWhitelistEnabled(enabled);
-  }
-
-  async createIpRule(cidr: string, label: string, enabled = true) {
-    const normalized = this.ipService.normalizeCidr(cidr);
-    return this.prisma.ipWhitelist.create({ data: { cidr: normalized, label: label.trim(), enabled } });
-  }
-
-  async updateIpRule(id: string, input: { cidr?: string; label?: string; enabled?: boolean }) {
-    const normalized = input.cidr ? this.ipService.normalizeCidr(input.cidr) : undefined;
-    const target = await this.prisma.ipWhitelist.findUnique({ where: { id } });
-    if (!target) throw new NotFoundException("IP 白名单规则不存在。");
-    return this.prisma.ipWhitelist.update({ where: { id }, data: {
-      ...(normalized ? { cidr: normalized } : {}),
-      ...(input.label !== undefined ? { label: input.label.trim() } : {}),
-      ...(input.enabled !== undefined ? { enabled: input.enabled } : {}),
-    } });
-  }
-
-  async deleteIpRule(id: string) {
-    const result = await this.prisma.ipWhitelist.deleteMany({ where: { id } });
-    if (!result.count) throw new NotFoundException("IP 白名单规则不存在。");
-    return { success: true };
+  async unbindDevice(actor: RequestUser, userId: string, ip: string | null) {
+    if (actor.id === userId) throw new BadRequestException("不能直接解除当前管理员自己的设备绑定，请使用其他管理员账号操作或执行服务器紧急恢复命令。");
+    const target = await this.prisma.user.findUnique({ where: { id: userId }, select: { role: true } });
+    if (target && actor.role !== "SUPER_ADMIN" && target.role !== "EMPLOYEE") {
+      throw new ForbiddenException("只有超级管理员可以解除管理员账号的设备绑定。");
+    }
+    return this.deviceBindingService.unbindDevice(userId, actor.id, ip);
   }
 
   listImportBatches() {
