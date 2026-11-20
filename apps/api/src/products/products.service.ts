@@ -147,8 +147,8 @@ export class ProductsService {
     page?: number;
     pageSize?: number;
     keyword?: string;
-    categoryLevel1?: string;
-    categoryLevel2?: string;
+    categoryLevel1?: string[];
+    categoryLevel2?: string[];
     shopType?: string;
     listingDateFrom?: string;
     listingDateTo?: string;
@@ -178,8 +178,8 @@ export class ProductsService {
         { shopName: { contains: keyword, mode: "insensitive" } },
       ];
     }
-    if (query.categoryLevel1) where.latestCategoryLevel1 = query.categoryLevel1;
-    if (query.categoryLevel2) where.latestCategoryLevel2 = query.categoryLevel2;
+    if (query.categoryLevel1?.length) where.latestCategoryLevel1 = { in: query.categoryLevel1 };
+    if (query.categoryLevel2?.length) where.latestCategoryLevel2 = { in: query.categoryLevel2 };
     if (query.shopType) where.shopType = query.shopType;
     const selectedPeriods = normalizePeriodStarts(query.latestWeekStarts);
     const hasConsecutiveWeekRange = query.consecutiveWeekCountMin !== undefined || query.consecutiveWeekCountMax !== undefined;
@@ -293,8 +293,8 @@ export class ProductsService {
     pageSize?: number;
     keyword?: string;
     memberKeyword?: string;
-    categoryLevel1?: string;
-    categoryLevel2?: string;
+    categoryLevel1?: string[];
+    categoryLevel2?: string[];
     shopType?: string;
     listingDateFrom?: string;
     listingDateTo?: string;
@@ -335,8 +335,8 @@ export class ProductsService {
         { shopName: { contains: keyword, mode: "insensitive" } },
       ];
     }
-    if (query.categoryLevel1) where.latestCategoryLevel1 = query.categoryLevel1;
-    if (query.categoryLevel2) where.latestCategoryLevel2 = query.categoryLevel2;
+    if (query.categoryLevel1?.length) where.latestCategoryLevel1 = { in: query.categoryLevel1 };
+    if (query.categoryLevel2?.length) where.latestCategoryLevel2 = { in: query.categoryLevel2 };
     if (query.shopType) where.shopType = query.shopType;
     const selectedPeriods = normalizePeriodStarts(query.latestWeekStarts);
     const hasConsecutiveWeekRange = query.consecutiveWeekCountMin !== undefined || query.consecutiveWeekCountMax !== undefined;
@@ -526,15 +526,19 @@ export class ProductsService {
     return { productId, isFavorited: false };
   }
 
-  async categories(level1?: string) {
+  async categories(level1?: string[]) {
+    const selectedLevel1 = [...new Set(level1 ?? [])].filter(Boolean);
     const rows = await this.prisma.category.findMany({
-      where: { enabled: true, ...(level1 ? { categoryLevel1: level1 } : {}) },
+      // 一级类目选项必须始终完整返回；选中项只用于收窄二级类目选项。
+      where: { enabled: true },
       orderBy: [{ categoryLevel1: "asc" }, { categoryLevel2: "asc" }],
       select: { categoryLevel1: true, categoryLevel2: true },
     });
     return {
       level1: [...new Set(rows.map((row) => row.categoryLevel1))],
-      level2: level1 ? [...new Set(rows.map((row) => row.categoryLevel2).filter((value): value is string => Boolean(value)))] : [],
+      level2: selectedLevel1.length
+        ? [...new Set(rows.filter((row) => selectedLevel1.includes(row.categoryLevel1)).map((row) => row.categoryLevel2).filter((value): value is string => Boolean(value)))]
+        : [],
     };
   }
 

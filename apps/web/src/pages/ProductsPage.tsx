@@ -11,8 +11,8 @@ import { useNavigate } from "react-router-dom";
 
 interface Filters {
   keyword?: string;
-  categoryLevel1?: string;
-  categoryLevel2?: string;
+  categoryLevel1?: string[];
+  categoryLevel2?: string[];
   shopType?: string;
   listingDateFrom?: string;
   listingDateTo?: string;
@@ -189,6 +189,8 @@ export function ProductsPage() {
     page,
     pageSize,
     ...filters,
+    categoryLevel1: filters.categoryLevel1?.join(",") || undefined,
+    categoryLevel2: filters.categoryLevel2?.join(",") || undefined,
     latestWeekStarts: filters.latestWeekStarts?.join(",") || undefined,
   }), [page, pageSize, filters]);
   const productsQuery = useQuery({
@@ -203,7 +205,9 @@ export function ProductsPage() {
   });
   const categoriesQuery = useQuery({
     queryKey: ["categories", draft.categoryLevel1],
-    queryFn: async () => (await api.get<CategoryOptions>("/products/categories", { params: draft.categoryLevel1 ? { level1: draft.categoryLevel1 } : {} })).data,
+    queryFn: async () => (await api.get<CategoryOptions>("/products/categories", {
+      params: draft.categoryLevel1?.length ? { level1: draft.categoryLevel1.join(",") } : {},
+    })).data,
   });
   const periodsQuery = useQuery({
     queryKey: ["product-periods"],
@@ -371,11 +375,11 @@ export function ProductsPage() {
           </div>
           <div className="filter-field">
             <label htmlFor="filter-category-level1">一级类目</label>
-            <Select id="filter-category-level1" allowClear showSearch optionFilterProp="label" value={draft.categoryLevel1} onChange={(value) => setDraft((prev) => ({ ...prev, categoryLevel1: value, categoryLevel2: undefined }))} placeholder="全部" options={(categoriesQuery.data?.level1 ?? []).map((value) => ({ label: value, value }))} />
+            <Select id="filter-category-level1" mode="multiple" allowClear showSearch optionFilterProp="label" maxTagCount="responsive" value={draft.categoryLevel1 ?? []} onChange={(value) => setDraft((prev) => ({ ...prev, categoryLevel1: value, categoryLevel2: [] }))} placeholder="全部（可多选）" options={(categoriesQuery.data?.level1 ?? []).map((value) => ({ label: value, value }))} />
           </div>
           <div className="filter-field">
             <label htmlFor="filter-category-level2">二级类目</label>
-            <Select id="filter-category-level2" allowClear showSearch optionFilterProp="label" disabled={!draft.categoryLevel1} value={draft.categoryLevel2} onChange={(value) => setDraft((prev) => ({ ...prev, categoryLevel2: value }))} placeholder="全部" options={(categoriesQuery.data?.level2 ?? []).map((value) => ({ label: value, value }))} />
+            <Select id="filter-category-level2" mode="multiple" allowClear showSearch optionFilterProp="label" maxTagCount="responsive" disabled={!draft.categoryLevel1?.length} value={draft.categoryLevel2 ?? []} onChange={(value) => setDraft((prev) => ({ ...prev, categoryLevel2: value }))} placeholder="全部（可多选）" options={(categoriesQuery.data?.level2 ?? []).map((value) => ({ label: value, value }))} />
           </div>
           <div className="filter-field filter-field-shop-type">
             <label htmlFor="filter-shop-type">店铺类型</label>

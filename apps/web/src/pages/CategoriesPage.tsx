@@ -58,6 +58,7 @@ interface CategoryTableRow {
   key: string;
   id: string | null;
   isParent: boolean;
+  importStatus: "COMPLETE" | "INCOMPLETE";
   categoryLevel1: string;
   categoryLevel2: string | null;
   responsibleUserId: string | null;
@@ -75,6 +76,7 @@ export function CategoriesPage() {
   const queryClient = useQueryClient();
   const isAdmin = user?.role === "ADMIN" || user?.role === "SUPER_ADMIN";
   const [mineOnly, setMineOnly] = useState(false);
+  const [statusFilter, setStatusFilter] = useState<"ALL" | "INCOMPLETE">("ALL");
   const [search, setSearch] = useState("");
   const [categoryModalOpen, setCategoryModalOpen] = useState(false);
   const [categoryType, setCategoryType] = useState<"parent" | "child">("parent");
@@ -113,9 +115,12 @@ export function CategoriesPage() {
 
   const tableRows = useMemo<CategoryTableRow[]>(() => {
     const keyword = search.trim().toLocaleLowerCase();
+    const expectedWeeks = overview?.periods.length ?? 0;
     return (overview?.categories ?? []).flatMap((parent) => {
       const childRows = parent.children
         .filter((child) => !mineOnly || child.ownerUserId === user?.id)
+        .filter((child) => statusFilter !== "INCOMPLETE" ||
+          expectedWeeks === 0 || child.weekCounts.length !== expectedWeeks || child.weekCounts.some((week) => week.count <= 0))
         .filter((child) => !keyword ||
           parent.categoryLevel1.toLocaleLowerCase().includes(keyword) ||
           child.categoryLevel2.toLocaleLowerCase().includes(keyword))
@@ -123,6 +128,9 @@ export function CategoriesPage() {
           key: `child:${child.id}`,
           id: child.id,
           isParent: false,
+          importStatus: expectedWeeks > 0 && child.weekCounts.length === expectedWeeks && child.weekCounts.every((week) => week.count > 0)
+            ? "COMPLETE" as const
+            : "INCOMPLETE" as const,
           categoryLevel1: "",
           categoryLevel2: child.categoryLevel2,
           responsibleUserId: child.responsibleUserId,
@@ -133,13 +141,17 @@ export function CategoriesPage() {
         }));
 
       const parentMatches = !keyword || parent.categoryLevel1.toLocaleLowerCase().includes(keyword);
-      const includeParent = (!mineOnly || parent.ownerUserId === user?.id || childRows.length > 0) && (parentMatches || childRows.length > 0);
+      const parentComplete = expectedWeeks > 0 && parent.weekProgress.length === expectedWeeks &&
+        parent.weekProgress.every((week) => week.total > 0 && week.imported === week.total);
+      const includeParent = (!mineOnly || parent.ownerUserId === user?.id || childRows.length > 0) &&
+        (parentMatches || childRows.length > 0) && (statusFilter !== "INCOMPLETE" || !parentComplete);
       if (!includeParent) return [];
 
       return [{
         key: `parent:${parent.categoryLevel1}`,
         id: parent.id,
         isParent: true,
+        importStatus: parentComplete ? "COMPLETE" : "INCOMPLETE",
         categoryLevel1: parent.categoryLevel1,
         categoryLevel2: null,
         responsibleUserId: parent.responsibleUserId,
@@ -151,7 +163,7 @@ export function CategoriesPage() {
         children: childRows,
       }];
     });
-  }, [overview, mineOnly, search, user?.id]);
+  }, [overview, mineOnly, statusFilter, search, user?.id]);
 
   function openCreate(type: "parent" | "child") {
     setCategoryType(type);
@@ -254,6 +266,27 @@ export function CategoriesPage() {
         fixed: "left",
         render: (_value, row) => renderOwner(row),
       },
+      {
+        title: "状态",
+        dataIndex: "importStatus",
+        key: "importStatus",
+        width: 110,
+        fixed: "left",
+        align: "center",
+        render: (value: CategoryTableRow["importStatus"], row) => {
+          const completedWeeks = row.isParent
+            ? row.weekProgress?.filter((week) => week.total > 0 && week.imported === week.total).length ?? 0
+            : row.weekCounts?.filter((week) => week.count > 0).length ?? 0;
+          const totalWeeks = overview?.periods.length ?? 12;
+          return (
+            <Tooltip title={`最近${totalWeeks}周完成 ${completedWeeks}/${totalWeeks} 周`}>
+              <Tag color={value === "COMPLETE" ? "success" : "error"}>
+                {value === "COMPLETE" ? "已完成" : "未完成"}
+              </Tag>
+            </Tooltip>
+          );
+        },
+      },
     ];
     const weekColumns: ColumnsType<CategoryTableRow> = (overview?.periods ?? []).map((period) => ({
       title: (
@@ -267,7 +300,7 @@ export function CategoriesPage() {
       render: (_value, row) => renderWeekCell(row, period),
     }));
     return [...fixedColumns, ...weekColumns];
-  }, [overview?.periods, employeeOptions, isAdmin, ownerMutation.isPending]);
+  }, [overview, employeeOptions, isAdmin, ownerMutation.isPending]);
 
   const parentOptions = (overview?.categories ?? []).map((item) => ({
     value: item.categoryLevel1,
@@ -298,6 +331,11 @@ export function CategoriesPage() {
               options={[{ label: "全部类目", value: "all" }, { label: "我负责的类目", value: "mine" }]}
               onChange={(value) => setMineOnly(value === "mine")}
             />
+            <Segmented
+              value={statusFilter}
+              options={[{ label: "全部状态", value: "ALL" }, { label: "未完成导入", value: "INCOMPLETE" }]}
+              onChange={(value) => setStatusFilter(value === "INCOMPLETE" ? "INCOMPLETE" : "ALL")}
+            />
             <Input.Search
               allowClear
               placeholder="搜索一级或二级类目"
@@ -321,9 +359,11 @@ export function CategoriesPage() {
           pagination={{ pageSize: 30, showSizeChanger: true, pageSizeOptions: [30, 50, 100], showTotal: (total) => `共 ${total} 个一级类目` }}
           scroll={{ x: 2000 }}
           rowClassName={(row) => row.isParent ? "category-parent-row" : "category-child-row"}
-          locale={{ emptyText: <Empty description={mineOnly ? "暂时没有分配给你的类目" : "暂无类目，请先添加类目或导入数据"} /> }}
+          locale={{ emptyText: <Empty description={statusFilter === "INCOMPLETE" ? "所有类目最近12周均已完成导入" : mineOnly ? "暂时没有分配给你的类目" : "暂无类目，请先添加类目或导入数据"} /> }}
         />
         <div className="category-legend">
+          <span><Tag color="success">已完成</Tag> 最近12周均有导入记录</span>
+          <span><Tag color="error">未完成</Tag> 至少有一个周期缺失</span>
           <span><Tag color="success">已导入</Tag> 有商品记录</span>
           <span><Tag>缺失</Tag> 该周没有入库记录</span>
           <span><Tag color="warning">部分完成</Tag> 一级类目下仍有二级类目缺失</span>
