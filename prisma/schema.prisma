@@ -111,7 +111,7 @@ model ProductHistory {
   rawPeriod       String      @map("原始日期范围") @db.VarChar(80)
   categoryName    String      @map("类目名称") @db.VarChar(255)
   categoryLevel1  String      @map("一级类目") @db.VarChar(255)
-  categoryLevel2  String?     @map("二级类目") @db.VarChar(255)
+  categoryLevel2  String      @map("二级类目") @db.VarChar(255)
   rank            Int?        @map("行业排名")
   trend           String?     @map("趋势") @db.VarChar(80)
   visitorRaw      String?     @map("访客数原值") @db.VarChar(100)

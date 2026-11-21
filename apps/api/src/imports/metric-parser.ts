@@ -9,8 +9,10 @@ export interface ParsedMetric {
 export interface ParsedCategory {
   raw: string;
   level1: string;
-  level2: string | null;
+  level2: string;
 }
+
+export const NO_SECOND_LEVEL_CATEGORY = "无二级类目";
 
 function parseNumber(value: string): number | null {
   const match = value.trim().replace(/,/g, "").match(/^([+-]?\d+(?:\.\d+)?)\s*(亿|万|千)?$/);
@@ -42,9 +44,9 @@ export function parseCategoryName(value: unknown): ParsedCategory | null {
   const raw = String(value).trim();
   if (!raw) return null;
   const separator = raw.indexOf("/");
-  if (separator < 0) return { raw, level1: raw, level2: null };
+  if (separator < 0) return { raw, level1: raw, level2: NO_SECOND_LEVEL_CATEGORY };
   const level1 = raw.slice(0, separator).trim();
-  const level2 = raw.slice(separator + 1).trim() || null;
+  const level2 = raw.slice(separator + 1).trim() || NO_SECOND_LEVEL_CATEGORY;
   if (!level1) return null;
   return { raw, level1, level2 };
 }

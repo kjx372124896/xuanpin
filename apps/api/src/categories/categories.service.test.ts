@@ -30,6 +30,14 @@ test("类目登记表返回12周进度，并让二级类目继承一级负责人
           responsibleUserId: "employee-2",
           responsibleUser: { id: "employee-2", name: "李四" },
         },
+        {
+          id: "child-no-level2",
+          categoryName: "家居收纳 / 无二级类目",
+          categoryLevel1: "家居收纳",
+          categoryLevel2: "无二级类目",
+          responsibleUserId: null,
+          responsibleUser: null,
+        },
       ],
     },
     user: {
@@ -51,6 +59,12 @@ test("类目登记表返回12周进度，并让二级类目继承一级负责人
             weekStart: weeks[10],
             _count: { _all: 4 },
           },
+          {
+            categoryLevel1: "家居收纳",
+            categoryLevel2: "无二级类目",
+            weekStart: weeks[11],
+            _count: { _all: 2 },
+          },
         ];
       },
     },
@@ -61,7 +75,7 @@ test("类目登记表返回12周进度，并让二级类目继承一级负责人
 
   const parent = result.categories.find((item) => item.categoryLevel1 === "家居收纳");
   assert.ok(parent);
-  assert.equal(parent.children.length, 2);
+  assert.equal(parent.children.length, 3);
 
   const inheritedChild = parent.children.find((item) => item.categoryLevel2 === "厨房置物架");
   assert.ok(inheritedChild);
@@ -75,10 +89,16 @@ test("类目登记表返回12周进度，并让二级类目继承一级负责人
   assert.equal(overriddenChild.ownerUserId, "employee-2");
   assert.equal(overriddenChild.inherited, false);
 
+  const noLevel2Child = parent.children.find((item) => item.categoryLevel2 === "无二级类目");
+  assert.ok(noLevel2Child);
+  assert.equal(noLevel2Child.ownerUserId, "employee-1");
+  assert.equal(noLevel2Child.inherited, true);
+  assert.equal(noLevel2Child.weekCounts[11].count, 2);
+
   assert.deepEqual(parent.weekProgress[11], {
     weekStart: result.periods[11].weekStart,
-    imported: 1,
-    total: 2,
-    recordCount: 8,
+    imported: 2,
+    total: 3,
+    recordCount: 10,
   });
 });

@@ -68,7 +68,7 @@ export interface ProductHistoryItem {
   weekEnd: string;
   categoryName: string;
   categoryLevel1: string;
-  categoryLevel2: string | null;
+  categoryLevel2: string;
   rank: number | null;
   trend: string | null;
   visitor: MetricRange;

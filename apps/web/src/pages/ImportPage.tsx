@@ -12,7 +12,7 @@ interface PreviewFile {
   rowCount: number; validRows: number; errorCount: number; parseError: string | null;
   errors?: Array<{ row: number; productId?: string; message: string }>;
 }
-interface PreviewRow { productId: string; productName: string; categoryName: string; categoryLevel1: string; categoryLevel2: string | null; weekStart: string; weekEnd: string; rank: number | null; visitor: { raw: string | null; min: number | null; max: number | null; median: number | null }; buyer: { raw: string | null; min: number | null; max: number | null; median: number | null } }
+interface PreviewRow { productId: string; productName: string; categoryName: string; categoryLevel1: string; categoryLevel2: string; weekStart: string; weekEnd: string; rank: number | null; visitor: { raw: string | null; min: number | null; max: number | null; median: number | null }; buyer: { raw: string | null; min: number | null; max: number | null; median: number | null } }
 interface PreviewResult { batchId: string; status: string; totalFiles: number; totalRows: number; validRows: number; errorRows: number; duplicateFiles: number; files: PreviewFile[]; previewRows: PreviewRow[] }
 interface ImportBatch { id: string; status: string; totalFiles: number; totalRows: number; importedRows: number; duplicateRows: number; errorRows: number; newProducts: number; createdHistories: number; updatedHistories: number; createdAt: string; completedAt: string | null; files: Array<{ id: string; originalName: string; status: string; rowCount: number; importedCount: number; errorCount: number; errorsJson?: string | null }> }
 
@@ -101,7 +101,7 @@ export function ImportPage() {
     { title: "开始日期", dataIndex: "weekStart", key: "weekStart", width: 112 },
     { title: "结束日期", dataIndex: "weekEnd", key: "weekEnd", width: 112 },
     { title: "一级类目", dataIndex: "categoryLevel1", key: "categoryLevel1", width: 130 },
-    { title: "二级类目", dataIndex: "categoryLevel2", key: "categoryLevel2", width: 150, render: (value: string | null) => value || "—" },
+    { title: "二级类目", dataIndex: "categoryLevel2", key: "categoryLevel2", width: 150 },
     { title: "支付买家数（最小/最大/中值）", key: "buyer", width: 165, render: (_: unknown, row: PreviewRow) => previewMetric(row.buyer) },
     { title: "访客数（最小/最大/中值）", key: "visitor", width: 165, render: (_: unknown, row: PreviewRow) => previewMetric(row.visitor) },
   ];

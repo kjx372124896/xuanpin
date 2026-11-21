@@ -22,7 +22,8 @@ test("异常区间不伪装成零", () => {
 test("类目按第一个斜杠拆成一级和二级，保留原始类目", () => {
   assert.deepEqual(parseCategoryName("餐饮具 / 咖啡杯"), { raw: "餐饮具 / 咖啡杯", level1: "餐饮具", level2: "咖啡杯" });
   assert.deepEqual(parseCategoryName(" 家居用品/收纳/旅行收纳 "), { raw: "家居用品/收纳/旅行收纳", level1: "家居用品", level2: "收纳/旅行收纳" });
-  assert.deepEqual(parseCategoryName("厨房用品"), { raw: "厨房用品", level1: "厨房用品", level2: null });
+  assert.deepEqual(parseCategoryName("厨房用品"), { raw: "厨房用品", level1: "厨房用品", level2: "无二级类目" });
+  assert.deepEqual(parseCategoryName("餐饮具 / "), { raw: "餐饮具 /", level1: "餐饮具", level2: "无二级类目" });
   assert.equal(parseCategoryName(" / 咖啡杯"), null);
 });
 
