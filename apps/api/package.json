@@ -1,6 +1,6 @@
 {
   "name": "@selection/api",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "scripts": {
     "dev": "ts-node-dev --respawn --transpile-only --exit-child src/main.ts",

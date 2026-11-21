@@ -8,13 +8,14 @@ import { api, errorMessage } from "../api";
 
 interface PreviewFile {
   id: string; originalName: string; status: string; sheetName: string | null;
+  boardType: "NEW_PRODUCT_TRAFFIC" | "TRANSACTION_GROWTH" | null;
   weekStart: string | null; weekEnd: string | null; categoryName: string | null;
   rowCount: number; validRows: number; errorCount: number; parseError: string | null;
   errors?: Array<{ row: number; productId?: string; message: string }>;
 }
 interface PreviewRow { productId: string; productName: string; categoryName: string; categoryLevel1: string; categoryLevel2: string; weekStart: string; weekEnd: string; rank: number | null; visitor: { raw: string | null; min: number | null; max: number | null; median: number | null }; buyer: { raw: string | null; min: number | null; max: number | null; median: number | null } }
 interface PreviewResult { batchId: string; status: string; totalFiles: number; totalRows: number; validRows: number; errorRows: number; duplicateFiles: number; files: PreviewFile[]; previewRows: PreviewRow[] }
-interface ImportBatch { id: string; status: string; totalFiles: number; totalRows: number; importedRows: number; duplicateRows: number; errorRows: number; newProducts: number; createdHistories: number; updatedHistories: number; createdAt: string; completedAt: string | null; files: Array<{ id: string; originalName: string; status: string; rowCount: number; importedCount: number; errorCount: number; errorsJson?: string | null }> }
+interface ImportBatch { id: string; status: string; totalFiles: number; totalRows: number; importedRows: number; duplicateRows: number; errorRows: number; newProducts: number; createdHistories: number; updatedHistories: number; createdAt: string; completedAt: string | null; files: Array<{ id: string; originalName: string; boardType: "NEW_PRODUCT_TRAFFIC" | "TRANSACTION_GROWTH" | null; status: string; rowCount: number; importedCount: number; errorCount: number; errorsJson?: string | null }> }
 
 const statusMap: Record<string, { label: string; color: string }> = {
   PREVIEW: { label: "待确认", color: "blue" }, QUEUED: { label: "排队中", color: "processing" },
@@ -23,6 +24,9 @@ const statusMap: Record<string, { label: string; color: string }> = {
 };
 
 function StatusTag({ status }: { status: string }) { const item = statusMap[status] ?? { label: status, color: "default" }; return <Tag color={item.color}>{item.label}</Tag>; }
+function boardTypeLabel(value: string | null | undefined) {
+  return value === "TRANSACTION_GROWTH" ? "交易增速" : value === "NEW_PRODUCT_TRAFFIC" ? "新品流量" : "未识别";
+}
 function previewMetric(metric: PreviewRow["buyer"]) {
   const format = (value: number | null) => value === null ? "—" : value.toLocaleString("zh-CN", { maximumFractionDigits: 1 });
   return <div className="metric-summary" title={metric.raw ?? undefined}><span>最小：{format(metric.min)}</span><span>最大：{format(metric.max)}</span><strong>中值：{format(metric.median)}</strong></div>;
@@ -48,6 +52,7 @@ export function ImportPage() {
     if (batchQuery.data?.status === "COMPLETED" || batchQuery.data?.status === "FAILED") {
       void queryClient.invalidateQueries({ queryKey: ["imports"] });
       void queryClient.invalidateQueries({ queryKey: ["products"] });
+      void queryClient.invalidateQueries({ queryKey: ["categoriesOverview"] });
     }
   }, [batchQuery.data?.status, queryClient]);
 
@@ -87,6 +92,7 @@ export function ImportPage() {
   });
   const fileColumns = [
     { title: "文件名", dataIndex: "originalName", key: "name", ellipsis: true },
+    { title: "榜单类型", dataIndex: "boardType", key: "boardType", width: 110, render: (value: string | null) => boardTypeLabel(value) },
     { title: "开始日期", dataIndex: "weekStart", key: "weekStart", width: 112 },
     { title: "结束日期", dataIndex: "weekEnd", key: "weekEnd", width: 112 },
     { title: "类目", dataIndex: "categoryName", key: "category", ellipsis: true },
@@ -134,7 +140,7 @@ export function ImportPage() {
       {!preview && currentBatch && <Card className="table-card" bordered={false}>
         <div className="section-heading"><div><Typography.Title level={4}>批次详情</Typography.Title><Typography.Text type="secondary">批次编号：{currentBatch.id}</Typography.Text></div><StatusTag status={currentBatch.status} /></div>
         <div className="import-summary-grid"><div><span>文件数</span><strong>{currentBatch.totalFiles}</strong></div><div><span>读取数据行</span><strong>{currentBatch.totalRows.toLocaleString()}</strong></div><div><span>成功入库</span><strong>{currentBatch.importedRows.toLocaleString()}</strong></div><div><span>重复记录</span><strong>{currentBatch.duplicateRows.toLocaleString()}</strong></div><div><span>异常行</span><strong>{currentBatch.errorRows.toLocaleString()}</strong></div></div>
-        <Table rowKey="id" size="small" dataSource={currentBatch.files} pagination={false} columns={[{ title: "文件名", dataIndex: "originalName", key: "name", ellipsis: true }, { title: "读取行数", dataIndex: "rowCount", key: "rows", width: 100 }, { title: "导入行数", dataIndex: "importedCount", key: "imported", width: 100 }, { title: "异常行", dataIndex: "errorCount", key: "errors", width: 90 }, { title: "状态", dataIndex: "status", key: "status", width: 110, render: (value: string) => <StatusTag status={value} /> }]} />
+        <Table rowKey="id" size="small" dataSource={currentBatch.files} pagination={false} columns={[{ title: "文件名", dataIndex: "originalName", key: "name", ellipsis: true }, { title: "榜单类型", dataIndex: "boardType", key: "boardType", width: 110, render: (value: string | null) => boardTypeLabel(value) }, { title: "读取行数", dataIndex: "rowCount", key: "rows", width: 100 }, { title: "导入行数", dataIndex: "importedCount", key: "imported", width: 100 }, { title: "异常行", dataIndex: "errorCount", key: "errors", width: 90 }, { title: "状态", dataIndex: "status", key: "status", width: 110, render: (value: string) => <StatusTag status={value} /> }]} />
         {batchErrors.length > 0 && <><div className="subsection-heading">错误行明细（最多显示每个文件前 200 行）</div><Table rowKey={(row) => `${row.fileName}-${row.row}`} size="small" pagination={{ pageSize: 10 }} dataSource={batchErrors} columns={[{ title: "文件", dataIndex: "fileName", key: "file", ellipsis: true }, { title: "行号", dataIndex: "row", key: "row", width: 70 }, { title: "商品ID", dataIndex: "productId", key: "id", width: 130 }, { title: "错误原因", dataIndex: "message", key: "message" }]} /></>}
       </Card>}
 

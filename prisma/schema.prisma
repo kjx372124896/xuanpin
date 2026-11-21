@@ -50,49 +50,57 @@ enum ImportFileStatus {
   @@map("导入文件状态")
 }
 
+enum BoardType {
+  NEW_PRODUCT_TRAFFIC
+  TRANSACTION_GROWTH
+
+  @@map("榜单类型")
+}
+
 model Product {
-  productId            String            @id @map("商品ID") @db.VarChar(80)
-  productName          String            @map("商品名称") @db.Text
-  productUrl           String?           @map("商品链接") @db.Text
-  shopName             String?           @map("店铺名称") @db.VarChar(255)
-  shopType             String?           @map("店铺类型") @db.VarChar(80)
-  imageUrl             String?           @map("商品图片链接") @db.Text
-  latestCategory       String?           @map("最新类目名称") @db.VarChar(255)
-  latestCategoryLevel1 String?           @map("最新一级类目") @db.VarChar(255)
-  latestCategoryLevel2 String?           @map("最新二级类目") @db.VarChar(255)
-  firstWeekStart       DateTime?         @map("首次上榜日期") @db.Date
-  latestWeekStart      DateTime?         @map("最近上榜日期") @db.Date
-  latestWeekEnd        DateTime?         @map("最近上榜结束日期") @db.Date
-  latestRank           Int?              @map("最近行业排名")
-  historyWeekCount     Int               @default(0) @map("历史上榜周数")
-  historyRecordCount   Int               @default(0) @map("历史记录条数")
-  consecutiveWeekCount Int               @default(0) @map("连续上榜周数")
-  latestVisitorRaw     String?           @map("最新访客数原值") @db.VarChar(100)
-  latestVisitorMin     Decimal?          @map("最新访客数下限") @db.Decimal(20, 2)
-  latestVisitorMax     Decimal?          @map("最新访客数上限") @db.Decimal(20, 2)
-  latestVisitorMedian  Decimal?          @map("最新访客数中值") @db.Decimal(20, 2)
-  latestBuyerRaw       String?           @map("最新支付买家数原值") @db.VarChar(100)
-  latestBuyerMin       Decimal?          @map("最新支付买家数下限") @db.Decimal(20, 2)
-  latestBuyerMax       Decimal?          @map("最新支付买家数上限") @db.Decimal(20, 2)
-  latestBuyerMedian    Decimal?          @map("最新支付买家数中值") @db.Decimal(20, 2)
-  latestCartRaw        String?           @map("最新加购人数原值") @db.VarChar(100)
-  latestCartMin        Decimal?          @map("最新加购人数下限") @db.Decimal(20, 2)
-  latestCartMax        Decimal?          @map("最新加购人数上限") @db.Decimal(20, 2)
-  latestCartMedian     Decimal?          @map("最新加购人数中值") @db.Decimal(20, 2)
-  aiPreviousSales      String?           @map("上期销售额") @db.Text
-  aiSales              String?           @map("销售额") @db.Text
-  aiClickRate          String?           @map("点击率") @db.Text
-  aiConversionRate     String?           @map("转化率") @db.Text
-  aiAddToCartRate      String?           @map("加购率") @db.Text
-  aiAddToCartCost      String?           @map("加购成本") @db.Text
-  aiRoi                String?           @map("投产比") @db.Text
-  aiUnitPrice          String?           @map("件单价") @db.Text
-  aiSpend              String?           @map("花费") @db.Text
-  aiCpc                String?           @map("CPC") @db.Text
-  aiMetricsFetchedAt   DateTime?         @map("AI数据获取时间")
-  createdAt            DateTime          @default(now()) @map("创建时间")
-  updatedAt            DateTime          @updatedAt @map("更新时间")
+  productId            String              @id @map("商品ID") @db.VarChar(80)
+  productName          String              @map("商品名称") @db.Text
+  productUrl           String?             @map("商品链接") @db.Text
+  shopName             String?             @map("店铺名称") @db.VarChar(255)
+  shopType             String?             @map("店铺类型") @db.VarChar(80)
+  imageUrl             String?             @map("商品图片链接") @db.Text
+  latestCategory       String?             @map("最新类目名称") @db.VarChar(255)
+  latestCategoryLevel1 String?             @map("最新一级类目") @db.VarChar(255)
+  latestCategoryLevel2 String?             @map("最新二级类目") @db.VarChar(255)
+  firstWeekStart       DateTime?           @map("首次上榜日期") @db.Date
+  latestWeekStart      DateTime?           @map("最近上榜日期") @db.Date
+  latestWeekEnd        DateTime?           @map("最近上榜结束日期") @db.Date
+  latestRank           Int?                @map("最近行业排名")
+  historyWeekCount     Int                 @default(0) @map("历史上榜周数")
+  historyRecordCount   Int                 @default(0) @map("历史记录条数")
+  consecutiveWeekCount Int                 @default(0) @map("连续上榜周数")
+  latestVisitorRaw     String?             @map("最新访客数原值") @db.VarChar(100)
+  latestVisitorMin     Decimal?            @map("最新访客数下限") @db.Decimal(20, 2)
+  latestVisitorMax     Decimal?            @map("最新访客数上限") @db.Decimal(20, 2)
+  latestVisitorMedian  Decimal?            @map("最新访客数中值") @db.Decimal(20, 2)
+  latestBuyerRaw       String?             @map("最新支付买家数原值") @db.VarChar(100)
+  latestBuyerMin       Decimal?            @map("最新支付买家数下限") @db.Decimal(20, 2)
+  latestBuyerMax       Decimal?            @map("最新支付买家数上限") @db.Decimal(20, 2)
+  latestBuyerMedian    Decimal?            @map("最新支付买家数中值") @db.Decimal(20, 2)
+  latestCartRaw        String?             @map("最新加购人数原值") @db.VarChar(100)
+  latestCartMin        Decimal?            @map("最新加购人数下限") @db.Decimal(20, 2)
+  latestCartMax        Decimal?            @map("最新加购人数上限") @db.Decimal(20, 2)
+  latestCartMedian     Decimal?            @map("最新加购人数中值") @db.Decimal(20, 2)
+  aiPreviousSales      String?             @map("上期销售额") @db.Text
+  aiSales              String?             @map("销售额") @db.Text
+  aiClickRate          String?             @map("点击率") @db.Text
+  aiConversionRate     String?             @map("转化率") @db.Text
+  aiAddToCartRate      String?             @map("加购率") @db.Text
+  aiAddToCartCost      String?             @map("加购成本") @db.Text
+  aiRoi                String?             @map("投产比") @db.Text
+  aiUnitPrice          String?             @map("件单价") @db.Text
+  aiSpend              String?             @map("花费") @db.Text
+  aiCpc                String?             @map("CPC") @db.Text
+  aiMetricsFetchedAt   DateTime?           @map("AI数据获取时间")
+  createdAt            DateTime            @default(now()) @map("创建时间")
+  updatedAt            DateTime            @updatedAt @map("更新时间")
   histories            ProductHistory[]
+  boardStats           ProductBoardStats[]
   favorites            ProductFavorite[]
 
   @@index([productName])
@@ -106,6 +114,7 @@ model Product {
 model ProductHistory {
   id              String      @id @default(cuid()) @map("历史记录ID") @db.VarChar(30)
   productId       String      @map("商品ID") @db.VarChar(80)
+  boardType       BoardType   @default(NEW_PRODUCT_TRAFFIC) @map("榜单类型")
   weekStart       DateTime    @map("周开始日期") @db.Date
   weekEnd         DateTime    @map("周结束日期") @db.Date
   rawPeriod       String      @map("原始日期范围") @db.VarChar(80)
@@ -126,6 +135,7 @@ model ProductHistory {
   cartMin         Decimal?    @map("加购人数下限") @db.Decimal(20, 2)
   cartMax         Decimal?    @map("加购人数上限") @db.Decimal(20, 2)
   cartMedian      Decimal?    @map("加购人数中值") @db.Decimal(20, 2)
+  productKeyword  String?     @map("商品关键词") @db.Text
   exportTime      DateTime?   @map("导出时间")
   sourceFileId    String?     @map("来源文件ID") @db.VarChar(30)
   sourceFileName  String?     @map("来源文件名") @db.Text
@@ -134,11 +144,44 @@ model ProductHistory {
   product         Product     @relation(fields: [productId], references: [productId], onDelete: Cascade)
   sourceFile      ImportFile? @relation(fields: [sourceFileId], references: [id], onDelete: SetNull)
 
-  @@unique([productId, weekStart, categoryName], map: "商品上榜历史_业务唯一键")
+  @@unique([boardType, productId, weekStart, categoryName], map: "商品上榜历史_榜单业务唯一键")
   @@index([productId, weekStart])
+  @@index([boardType, weekStart, categoryName])
   @@index([categoryLevel1, categoryLevel2])
   @@index([weekStart, categoryName, rank])
   @@map("商品上榜历史表")
+}
+
+model ProductBoardStats {
+  productId            String    @map("商品ID") @db.VarChar(80)
+  boardType            BoardType @map("榜单类型")
+  latestCategory       String?   @map("最新类目名称") @db.VarChar(255)
+  latestCategoryLevel1 String?   @map("最新一级类目") @db.VarChar(255)
+  latestCategoryLevel2 String?   @map("最新二级类目") @db.VarChar(255)
+  firstWeekStart       DateTime? @map("首次上榜日期") @db.Date
+  latestWeekStart      DateTime? @map("最近上榜日期") @db.Date
+  latestWeekEnd        DateTime? @map("最近上榜结束日期") @db.Date
+  latestRank           Int?      @map("最近行业排名")
+  historyWeekCount     Int       @default(0) @map("历史上榜周数")
+  historyRecordCount   Int       @default(0) @map("历史记录条数")
+  consecutiveWeekCount Int       @default(0) @map("连续上榜周数")
+  latestVisitorRaw     String?   @map("最新访客数原值") @db.VarChar(100)
+  latestVisitorMin     Decimal?  @map("最新访客数下限") @db.Decimal(20, 2)
+  latestVisitorMax     Decimal?  @map("最新访客数上限") @db.Decimal(20, 2)
+  latestVisitorMedian  Decimal?  @map("最新访客数中值") @db.Decimal(20, 2)
+  latestBuyerRaw       String?   @map("最新支付买家数原值") @db.VarChar(100)
+  latestBuyerMin       Decimal?  @map("最新支付买家数下限") @db.Decimal(20, 2)
+  latestBuyerMax       Decimal?  @map("最新支付买家数上限") @db.Decimal(20, 2)
+  latestBuyerMedian    Decimal?  @map("最新支付买家数中值") @db.Decimal(20, 2)
+  createdAt            DateTime  @default(now()) @map("创建时间")
+  updatedAt            DateTime  @updatedAt @map("更新时间")
+  product              Product   @relation(fields: [productId], references: [productId], onDelete: Cascade)
+
+  @@id([productId, boardType], map: "商品榜单统计表_pkey")
+  @@index([boardType, latestWeekStart])
+  @@index([boardType, latestCategoryLevel1, latestCategoryLevel2])
+  @@index([boardType, latestBuyerMedian])
+  @@map("商品榜单统计表")
 }
 
 model Category {
@@ -184,6 +227,7 @@ model ImportFile {
   batchId       String           @map("批次ID") @db.VarChar(30)
   originalName  String           @map("原始文件名") @db.Text
   sha256        String           @map("文件SHA256") @db.Char(64)
+  boardType     BoardType?       @map("榜单类型")
   fileSize      BigInt           @map("文件大小")
   sheetName     String?          @map("工作表名称") @db.VarChar(255)
   weekStart     DateTime?        @map("周开始日期") @db.Date

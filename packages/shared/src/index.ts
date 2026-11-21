@@ -1,6 +1,7 @@
 export type UserRole = "SUPER_ADMIN" | "ADMIN" | "EMPLOYEE";
 export type EmploymentStatus = "ACTIVE" | "RESIGNED" | "SUSPENDED";
 export type AccountStatus = "ACTIVE" | "DISABLED";
+export type BoardType = "NEW_PRODUCT_TRAFFIC" | "TRANSACTION_GROWTH";
 
 export interface SafeUser {
   id: string;
@@ -41,7 +42,6 @@ export interface ProductListItem {
   firstWeekStart: string | null;
   visitor: MetricRange;
   buyer: MetricRange;
-  cart: MetricRange;
   buyerTrend: Array<{
     weekStart: string;
     weekEnd: string;
@@ -73,7 +73,6 @@ export interface ProductHistoryItem {
   trend: string | null;
   visitor: MetricRange;
   buyer: MetricRange;
-  cart: MetricRange;
   exportTime: string | null;
 }
 

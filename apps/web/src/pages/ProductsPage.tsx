@@ -4,7 +4,7 @@ import { Button, Card, Checkbox, DatePicker, Empty, Image, Input, InputNumber, P
 import { CloudDownloadOutlined, FilterOutlined, LinkOutlined, ReloadOutlined, SearchOutlined, StarFilled, StarOutlined } from "@ant-design/icons";
 import type { ColumnsType } from "antd/es/table";
 import dayjs from "dayjs";
-import type { Paginated, ProductListItem } from "@selection/shared";
+import type { BoardType, Paginated, ProductListItem } from "@selection/shared";
 import { api, errorMessage } from "../api";
 import { useAuth } from "../auth/AuthContext";
 import { useNavigate } from "react-router-dom";
@@ -169,6 +169,7 @@ function openProductUrl(url: string | null) {
 }
 
 export function ProductsPage() {
+  const [boardType, setBoardType] = useState<BoardType>("NEW_PRODUCT_TRAFFIC");
   const [draft, setDraft] = useState<Filters>({});
   const [filters, setFilters] = useState<Filters>({});
   const [page, setPage] = useState(1);
@@ -188,30 +189,31 @@ export function ProductsPage() {
   const params = useMemo(() => ({
     page,
     pageSize,
+    boardType,
     ...filters,
     categoryLevel1: filters.categoryLevel1?.join(",") || undefined,
     categoryLevel2: filters.categoryLevel2?.join(",") || undefined,
     latestWeekStarts: filters.latestWeekStarts?.join(",") || undefined,
-  }), [page, pageSize, filters]);
+  }), [page, pageSize, boardType, filters]);
   const productsQuery = useQuery({
-    queryKey: ["products", "buyer-trend-v2", params],
+    queryKey: ["products", "board-v1", boardType, params],
     queryFn: async () => (await api.get<Paginated<ProductListItem>>("/products", { params })).data,
   });
   const teamParams = useMemo(() => ({ ...params, favoritesOnly: undefined, memberKeyword: memberKeyword.trim() || undefined }), [params, memberKeyword]);
   const teamFavoritesQuery = useQuery({
-    queryKey: ["team-favorites", "buyer-trend-v2", teamParams],
+    queryKey: ["team-favorites", "board-v1", boardType, teamParams],
     queryFn: async () => (await api.get<Paginated<TeamFavoriteProduct>>("/products/team-favorites", { params: teamParams })).data,
     enabled: isAdmin && teamFavoritesMode,
   });
   const categoriesQuery = useQuery({
-    queryKey: ["categories", draft.categoryLevel1],
+    queryKey: ["categories", boardType, draft.categoryLevel1],
     queryFn: async () => (await api.get<CategoryOptions>("/products/categories", {
-      params: draft.categoryLevel1?.length ? { level1: draft.categoryLevel1.join(",") } : {},
+      params: { boardType, ...(draft.categoryLevel1?.length ? { level1: draft.categoryLevel1.join(",") } : {}) },
     })).data,
   });
   const periodsQuery = useQuery({
-    queryKey: ["product-periods"],
-    queryFn: async () => (await api.get<PeriodOptions>("/products/periods")).data,
+    queryKey: ["product-periods", boardType],
+    queryFn: async () => (await api.get<PeriodOptions>("/products/periods", { params: { boardType } })).data,
   });
   const activeQuery = isAdmin && teamFavoritesMode ? teamFavoritesQuery : productsQuery;
   const data = activeQuery.data;
@@ -219,23 +221,36 @@ export function ProductsPage() {
   useEffect(() => {
     const tableBody = tableWrapperRef.current?.querySelector<HTMLElement>(".ant-table-body");
     if (tableBody) tableBody.scrollTop = 0;
-  }, [page, pageSize, teamFavoritesMode]);
+  }, [page, pageSize, teamFavoritesMode, boardType]);
 
-  // 根据列表滚动容器的实际高度计算表格 body 高度，避免固定视口减法在不同窗口尺寸下留下底部空白。
+  // 根据商品列表卡片主体的可用高度计算表格 body 高度，避免滚动容器塌缩时只显示少量行。
   useEffect(() => {
     const container = tableWrapperRef.current;
     if (!container) return;
+    const cardBody = container.closest<HTMLElement>(".table-card-products")?.querySelector<HTMLElement>(".ant-card-body");
+    const heading = cardBody?.querySelector<HTMLElement>(".table-heading");
 
     const updateTableHeight = () => {
       const header = container.querySelector<HTMLElement>(".ant-table-thead");
       const headerHeight = header?.getBoundingClientRect().height ?? 44;
-      const nextHeight = Math.max(160, Math.floor(container.clientHeight - headerHeight - 2));
+      const bodyStyle = cardBody ? window.getComputedStyle(cardBody) : null;
+      const headingStyle = heading ? window.getComputedStyle(heading) : null;
+      const verticalPadding = bodyStyle
+        ? (Number.parseFloat(bodyStyle.paddingTop) || 0) + (Number.parseFloat(bodyStyle.paddingBottom) || 0)
+        : 0;
+      const headingMargin = headingStyle ? Number.parseFloat(headingStyle.marginBottom) || 0 : 0;
+      const availableHeight = cardBody
+        ? cardBody.clientHeight - verticalPadding - (heading?.getBoundingClientRect().height ?? 0) - headingMargin
+        : container.clientHeight;
+      const nextHeight = Math.max(160, Math.floor(availableHeight - headerHeight - 2));
       setTableScrollY((current) => current === nextHeight ? current : nextHeight);
     };
 
     updateTableHeight();
     const observer = new ResizeObserver(updateTableHeight);
     observer.observe(container);
+    if (cardBody) observer.observe(cardBody);
+    if (heading) observer.observe(heading);
     return () => observer.disconnect();
   }, []);
 
@@ -456,9 +471,26 @@ export function ProductsPage() {
 
       <Card className="table-card table-card-products" bordered={false}>
         <div className="table-heading">
-          <div>
-            <Typography.Title level={4}>{teamFavoritesMode && isAdmin ? "成员收藏" : "商品列表"}</Typography.Title>
-            <Typography.Text type="secondary">{teamFavoritesMode && isAdmin ? "汇总所有普通成员收藏的商品，管理员可统一勾选并提交后台数据获取任务。" : "点击商品名称查看完整趋势，点击“打开链接”在新标签页查看商品。收藏商品后由管理员统一安排数据获取。"}</Typography.Text>
+          <div className="table-heading-title">
+            <div className="table-heading-copy">
+              <Typography.Title level={4}>{teamFavoritesMode && isAdmin ? "成员收藏" : "商品列表"}</Typography.Title>
+              {teamFavoritesMode && isAdmin && (
+                <Typography.Text type="secondary">汇总所有普通成员收藏的商品，管理员可统一勾选并提交后台数据获取任务。</Typography.Text>
+              )}
+            </div>
+            <Segmented
+              size="large"
+              value={boardType}
+              options={[{ label: "新品流量", value: "NEW_PRODUCT_TRAFFIC" }, { label: "交易增速", value: "TRANSACTION_GROWTH" }]}
+              onChange={(value) => {
+                setBoardType(value as BoardType);
+                setDraft({});
+                setFilters({});
+                setPage(1);
+                setSelectedProductIds([]);
+                setSelectedProductId(null);
+              }}
+            />
           </div>
           {isAdmin && (
             <div className="bulk-ai-actions">
@@ -519,7 +551,7 @@ export function ProductsPage() {
         </div>
       </Card>
       <Suspense fallback={null}>
-        <ProductDetailModal productId={selectedProductId ?? ""} open={Boolean(selectedProductId)} onClose={() => setSelectedProductId(null)} />
+        <ProductDetailModal productId={selectedProductId ?? ""} open={Boolean(selectedProductId)} onClose={() => setSelectedProductId(null)} boardType={boardType} />
       </Suspense>
     </div>
   );

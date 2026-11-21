@@ -5,7 +5,7 @@ import { LinkOutlined } from "@ant-design/icons";
 import ReactECharts from "echarts-for-react";
 import type { ColumnsType } from "antd/es/table";
 import dayjs from "dayjs";
-import type { ProductHistoryItem, ProductListItem } from "@selection/shared";
+import type { BoardType, ProductHistoryItem, ProductListItem } from "@selection/shared";
 import { api } from "../api";
 
 interface DetailResponse { product: Omit<ProductListItem, "buyerTrend" | "isFavorited">; histories: Array<ProductHistoryItem & { sourceFileName?: string | null }> }
@@ -44,16 +44,16 @@ function chartOption(rows: ProductHistoryItem[], key: "buyer" | "visitor") {
   };
 }
 
-export function ProductDetailModal({ productId, open, onClose }: { productId: string; open: boolean; onClose: () => void }) {
+export function ProductDetailModal({ productId, open, onClose, boardType }: { productId: string; open: boolean; onClose: () => void; boardType: BoardType }) {
   const [category, setCategory] = useState<string>();
   const [period, setPeriod] = useState("ALL");
-  const query = useQuery({ queryKey: ["product", productId], queryFn: async () => (await api.get<DetailResponse>(`/products/${encodeURIComponent(productId)}`)).data, enabled: Boolean(productId) && open });
+  const query = useQuery({ queryKey: ["product", productId, boardType], queryFn: async () => (await api.get<DetailResponse>(`/products/${encodeURIComponent(productId)}`, { params: { boardType } })).data, enabled: Boolean(productId) && open });
   const data = query.data;
 
   useEffect(() => {
     setCategory(data?.product.latestCategory ?? undefined);
     setPeriod("ALL");
-  }, [productId, data?.product.latestCategory]);
+  }, [productId, boardType, data?.product.latestCategory]);
 
   const categories = useMemo(() => [...new Set((data?.histories ?? []).map((row) => row.categoryName))], [data?.histories]);
   const historyRows = useMemo(() => {
@@ -69,7 +69,6 @@ export function ProductDetailModal({ productId, open, onClose }: { productId: st
     { title: "排名", dataIndex: "rank", key: "rank", align: "center", render: (value) => value ? `#${value}` : "—" },
     { title: "支付买家数（数值）", key: "buyer", width: 150, render: (_value, row) => metricCell(row.buyer) },
     { title: "访客数（数值）", key: "visitor", width: 150, render: (_value, row) => metricCell(row.visitor) },
-    { title: "加购人数（数值）", key: "cart", width: 150, render: (_value, row) => metricCell(row.cart) },
     { title: "趋势", dataIndex: "trend", key: "trend", render: (value) => value ? <Tag>{value}</Tag> : "—" },
   ];
 

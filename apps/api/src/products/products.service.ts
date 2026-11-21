@@ -27,7 +27,7 @@ function range(
   };
 }
 
-function mapProduct(product: any) {
+function mapProduct(stats: any, product: any = stats) {
   return {
     productId: product.productId,
     listingDate: calculateListingDate(product.productId),
@@ -36,19 +36,18 @@ function mapProduct(product: any) {
     shopName: product.shopName,
     shopType: product.shopType,
     imageUrl: product.imageUrl,
-    latestCategory: product.latestCategory,
-    latestCategoryLevel1: product.latestCategoryLevel1,
-    latestCategoryLevel2: product.latestCategoryLevel2,
-    latestWeekStart: product.latestWeekStart?.toISOString() ?? null,
-    latestWeekEnd: product.latestWeekEnd?.toISOString() ?? null,
-    latestRank: product.latestRank,
-    historyWeekCount: product.historyWeekCount,
-    historyRecordCount: product.historyRecordCount,
-    consecutiveWeekCount: product.consecutiveWeekCount,
-    firstWeekStart: product.firstWeekStart?.toISOString() ?? null,
-    visitor: range(product.latestVisitorRaw, product.latestVisitorMin, product.latestVisitorMax, product.latestVisitorMedian),
-    buyer: range(product.latestBuyerRaw, product.latestBuyerMin, product.latestBuyerMax, product.latestBuyerMedian),
-    cart: range(product.latestCartRaw, product.latestCartMin, product.latestCartMax, product.latestCartMedian),
+    latestCategory: stats.latestCategory,
+    latestCategoryLevel1: stats.latestCategoryLevel1,
+    latestCategoryLevel2: stats.latestCategoryLevel2,
+    latestWeekStart: stats.latestWeekStart?.toISOString() ?? null,
+    latestWeekEnd: stats.latestWeekEnd?.toISOString() ?? null,
+    latestRank: stats.latestRank,
+    historyWeekCount: stats.historyWeekCount,
+    historyRecordCount: stats.historyRecordCount,
+    consecutiveWeekCount: stats.consecutiveWeekCount,
+    firstWeekStart: stats.firstWeekStart?.toISOString() ?? null,
+    visitor: range(stats.latestVisitorRaw, stats.latestVisitorMin, stats.latestVisitorMax, stats.latestVisitorMedian),
+    buyer: range(stats.latestBuyerRaw, stats.latestBuyerMin, stats.latestBuyerMax, stats.latestBuyerMedian),
     aiPreviousSales: product.aiPreviousSales,
     aiSales: product.aiSales,
     aiClickRate: product.aiClickRate,
@@ -74,6 +73,7 @@ export class ProductsService {
     periods: string[],
     min?: number,
     max?: number,
+    boardType: "NEW_PRODUCT_TRAFFIC" | "TRANSACTION_GROWTH" = "NEW_PRODUCT_TRAFFIC",
   ): Promise<string[]> {
     if (!periods.length) return [];
 
@@ -90,10 +90,11 @@ export class ProductsService {
         SELECT DISTINCT h."商品ID", sp."anchor_date"
         FROM "商品上榜历史表" h
         INNER JOIN selected_periods sp ON h."周开始日期" = sp."anchor_date"
+        WHERE h."榜单类型" = ${boardType}::"榜单类型"
       ),
       history_weeks AS (
         SELECT DISTINCT "商品ID", "周开始日期"
-        FROM "商品上榜历史表"
+        FROM "商品上榜历史表" WHERE "榜单类型" = ${boardType}::"榜单类型"
       )
       SELECT
         a."商品ID" AS "productId",
@@ -144,6 +145,177 @@ export class ProductsService {
   }
 
   async list(query: {
+    page?: number;
+    pageSize?: number;
+    keyword?: string;
+    categoryLevel1?: string[];
+    categoryLevel2?: string[];
+    shopType?: string;
+    listingDateFrom?: string;
+    listingDateTo?: string;
+    latestWeekStarts?: string[];
+    latestBuyerMedianMin?: number;
+    latestBuyerMedianMax?: number;
+    historyWeekCountMin?: number;
+    historyWeekCountMax?: number;
+    consecutiveWeekCountMin?: number;
+    consecutiveWeekCountMax?: number;
+    aiMetricsStatus?: AiMetricsStatus;
+    favoritesOnly?: boolean;
+    boardType?: "NEW_PRODUCT_TRAFFIC" | "TRANSACTION_GROWTH";
+    userId: string;
+    sort?: string;
+    direction?: string;
+  }) {
+    const page = Math.max(1, Number(query.page ?? 1));
+    const pageSize = Math.min(100, Math.max(10, Number(query.pageSize ?? 20)));
+    const boardType = query.boardType ?? "NEW_PRODUCT_TRAFFIC";
+    const productConditions: Prisma.ProductWhereInput[] = [];
+    const listingDateProductIds = await this.findProductIdsByListingDateRange(query.listingDateFrom, query.listingDateTo);
+    if (listingDateProductIds !== undefined) productConditions.push({ productId: { in: listingDateProductIds } });
+    if (query.keyword?.trim()) {
+      const keyword = query.keyword.trim();
+      productConditions.push({
+        OR: [
+          { productId: { contains: keyword } },
+          { productName: { contains: keyword, mode: "insensitive" } },
+          { shopName: { contains: keyword, mode: "insensitive" } },
+        ],
+      });
+    }
+    if (query.shopType) productConditions.push({ shopType: query.shopType });
+    const aiWhere = aiMetricsStatusWhere(query.aiMetricsStatus);
+    if (Object.keys(aiWhere).length) productConditions.push(aiWhere);
+    if (query.favoritesOnly) productConditions.push({ favorites: { some: { userId: query.userId } } });
+
+    const where: Prisma.ProductBoardStatsWhereInput = {
+      boardType,
+      product: { AND: productConditions },
+    };
+    if (query.categoryLevel1?.length) where.latestCategoryLevel1 = { in: query.categoryLevel1 };
+    if (query.categoryLevel2?.length) where.latestCategoryLevel2 = { in: query.categoryLevel2 };
+
+    const selectedPeriods = normalizePeriodStarts(query.latestWeekStarts);
+    const hasConsecutiveWeekRange = query.consecutiveWeekCountMin !== undefined || query.consecutiveWeekCountMax !== undefined;
+    if (query.latestWeekStarts?.length) {
+      if (hasConsecutiveWeekRange) {
+        const matchingIds = await this.findProductsByConsecutiveWeeksAtPeriods(
+          selectedPeriods,
+          query.consecutiveWeekCountMin,
+          query.consecutiveWeekCountMax,
+          boardType,
+        );
+        productConditions.push({ productId: { in: matchingIds } });
+      } else {
+        productConditions.push({
+          histories: {
+            some: {
+              boardType,
+              weekStart: { in: selectedPeriods.map((value) => new Date(value + "T00:00:00.000Z")) },
+            },
+          },
+        });
+      }
+    } else if (hasConsecutiveWeekRange) {
+      where.consecutiveWeekCount = {
+        ...(query.consecutiveWeekCountMin !== undefined ? { gte: query.consecutiveWeekCountMin } : {}),
+        ...(query.consecutiveWeekCountMax !== undefined ? { lte: query.consecutiveWeekCountMax } : {}),
+      };
+    }
+    if (query.latestBuyerMedianMin !== undefined || query.latestBuyerMedianMax !== undefined) {
+      where.latestBuyerMedian = {
+        ...(query.latestBuyerMedianMin !== undefined && Number.isFinite(query.latestBuyerMedianMin)
+          ? { gte: new Prisma.Decimal(query.latestBuyerMedianMin) }
+          : {}),
+        ...(query.latestBuyerMedianMax !== undefined && Number.isFinite(query.latestBuyerMedianMax)
+          ? { lte: new Prisma.Decimal(query.latestBuyerMedianMax) }
+          : {}),
+      };
+    }
+    if (query.historyWeekCountMin !== undefined || query.historyWeekCountMax !== undefined) {
+      where.historyWeekCount = {
+        ...(query.historyWeekCountMin !== undefined ? { gte: query.historyWeekCountMin } : {}),
+        ...(query.historyWeekCountMax !== undefined ? { lte: query.historyWeekCountMax } : {}),
+      };
+    }
+
+    const sortMap: Record<string, Prisma.ProductBoardStatsOrderByWithRelationInput> = {
+      latestWeekStart: { latestWeekStart: "desc" },
+      latestRank: { latestRank: query.direction === "desc" ? "desc" : "asc" },
+      historyWeekCount: { historyWeekCount: query.direction === "asc" ? "asc" : "desc" },
+      consecutiveWeekCount: { consecutiveWeekCount: query.direction === "asc" ? "asc" : "desc" },
+      productName: { product: { productName: query.direction === "desc" ? "desc" : "asc" } },
+      latestBuyerMedian: {
+        latestBuyerMedian: {
+          sort: query.direction === "asc" ? "asc" : "desc",
+          nulls: "last",
+        },
+      },
+    };
+    const orderBy = sortMap[query.sort ?? "latestBuyerMedian"] ?? sortMap.latestBuyerMedian;
+    const [items, total] = await Promise.all([
+      this.prisma.productBoardStats.findMany({
+        where,
+        orderBy,
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+        include: { product: true },
+      }),
+      this.prisma.productBoardStats.count({ where }),
+    ]);
+
+    const productIds = items.map((item) => item.productId);
+    const [historyRows, favoriteRows] = await Promise.all([
+      productIds.length
+        ? this.prisma.productHistory.findMany({
+          where: { productId: { in: productIds }, boardType },
+          select: { productId: true, weekStart: true, weekEnd: true, buyerRaw: true, buyerMin: true, buyerMax: true, buyerMedian: true, exportTime: true, categoryName: true },
+        })
+        : [],
+      productIds.length
+        ? this.prisma.productFavorite.findMany({
+          where: { userId: query.userId, productId: { in: productIds } },
+          select: { productId: true },
+        })
+        : [],
+    ]);
+    const favoriteIds = new Set(favoriteRows.map((row) => row.productId));
+    historyRows.sort((a, b) => a.productId.localeCompare(b.productId)
+      || a.weekStart.getTime() - b.weekStart.getTime()
+      || (b.exportTime?.getTime() ?? 0) - (a.exportTime?.getTime() ?? 0)
+      || a.categoryName.localeCompare(b.categoryName));
+    const trendByProduct = new Map<string, Array<{ weekStart: string; weekEnd: string; raw: string | null; min: number | null; max: number | null; median: number | null }>>();
+    const seenProductWeeks = new Set<string>();
+    for (const row of historyRows) {
+      const weekKey = row.productId + "|" + row.weekStart.toISOString().slice(0, 10);
+      if (seenProductWeeks.has(weekKey)) continue;
+      seenProductWeeks.add(weekKey);
+      const trend = trendByProduct.get(row.productId) ?? [];
+      trend.push({
+        weekStart: row.weekStart.toISOString(),
+        weekEnd: row.weekEnd.toISOString(),
+        raw: row.buyerRaw,
+        min: row.buyerMin === null ? null : Number(row.buyerMin),
+        max: row.buyerMax === null ? null : Number(row.buyerMax),
+        median: row.buyerMedian === null ? null : Number(row.buyerMedian),
+      });
+      trendByProduct.set(row.productId, trend);
+    }
+
+    return {
+      items: items.map((item) => ({
+        ...mapProduct(item, item.product),
+        isFavorited: favoriteIds.has(item.productId),
+        buyerTrend: (trendByProduct.get(item.productId) ?? []).slice(-12),
+      })),
+      page,
+      pageSize,
+      total,
+      totalPages: Math.ceil(total / pageSize),
+    };
+  }
+
+  async listLegacy(query: {
     page?: number;
     pageSize?: number;
     keyword?: string;
@@ -288,7 +460,7 @@ export class ProductsService {
     };
   }
 
-  async teamFavorites(query: {
+  async teamFavoritesLegacy(query: {
     page?: number;
     pageSize?: number;
     keyword?: string;
@@ -449,7 +621,243 @@ export class ProductsService {
     };
   }
 
-  async periods() {
+  async teamFavorites(query: {
+    page?: number;
+    pageSize?: number;
+    keyword?: string;
+    memberKeyword?: string;
+    categoryLevel1?: string[];
+    categoryLevel2?: string[];
+    shopType?: string;
+    listingDateFrom?: string;
+    listingDateTo?: string;
+    latestWeekStarts?: string[];
+    latestBuyerMedianMin?: number;
+    latestBuyerMedianMax?: number;
+    historyWeekCountMin?: number;
+    historyWeekCountMax?: number;
+    consecutiveWeekCountMin?: number;
+    consecutiveWeekCountMax?: number;
+    aiMetricsStatus?: AiMetricsStatus;
+    boardType?: "NEW_PRODUCT_TRAFFIC" | "TRANSACTION_GROWTH";
+    adminUserId: string;
+  }) {
+    const page = Math.max(1, Number(query.page ?? 1));
+    const pageSize = Math.min(100, Math.max(10, Number(query.pageSize ?? 50)));
+    const boardType = query.boardType ?? "NEW_PRODUCT_TRAFFIC";
+    const memberConditions: Prisma.UserWhereInput[] = [
+      { OR: [{ role: "EMPLOYEE" }, { id: query.adminUserId }] },
+    ];
+    if (query.memberKeyword?.trim()) {
+      const memberKeyword = query.memberKeyword.trim();
+      memberConditions.push({
+        OR: [
+          { name: { contains: memberKeyword, mode: "insensitive" } },
+          { username: { contains: memberKeyword, mode: "insensitive" } },
+          { department: { contains: memberKeyword, mode: "insensitive" } },
+        ],
+      });
+    }
+    const memberWhere: Prisma.UserWhereInput = { AND: memberConditions };
+    const productConditions: Prisma.ProductWhereInput[] = [
+      { favorites: { some: { user: memberWhere } } },
+    ];
+    const listingDateProductIds = await this.findProductIdsByListingDateRange(query.listingDateFrom, query.listingDateTo);
+    if (listingDateProductIds !== undefined) productConditions.push({ productId: { in: listingDateProductIds } });
+    if (query.keyword?.trim()) {
+      const keyword = query.keyword.trim();
+      productConditions.push({
+        OR: [
+          { productId: { contains: keyword } },
+          { productName: { contains: keyword, mode: "insensitive" } },
+          { shopName: { contains: keyword, mode: "insensitive" } },
+        ],
+      });
+    }
+    if (query.shopType) productConditions.push({ shopType: query.shopType });
+    const aiWhere = aiMetricsStatusWhere(query.aiMetricsStatus);
+    if (Object.keys(aiWhere).length) productConditions.push(aiWhere);
+
+    const where: Prisma.ProductBoardStatsWhereInput = {
+      boardType,
+      product: { AND: productConditions },
+    };
+    if (query.categoryLevel1?.length) where.latestCategoryLevel1 = { in: query.categoryLevel1 };
+    if (query.categoryLevel2?.length) where.latestCategoryLevel2 = { in: query.categoryLevel2 };
+    const selectedPeriods = normalizePeriodStarts(query.latestWeekStarts);
+    const hasConsecutiveWeekRange = query.consecutiveWeekCountMin !== undefined || query.consecutiveWeekCountMax !== undefined;
+    if (query.latestWeekStarts?.length) {
+      if (hasConsecutiveWeekRange) {
+        const matchingIds = await this.findProductsByConsecutiveWeeksAtPeriods(
+          selectedPeriods,
+          query.consecutiveWeekCountMin,
+          query.consecutiveWeekCountMax,
+          boardType,
+        );
+        productConditions.push({ productId: { in: matchingIds } });
+      } else {
+        productConditions.push({
+          histories: {
+            some: {
+              boardType,
+              weekStart: { in: selectedPeriods.map((value) => new Date(value + "T00:00:00.000Z")) },
+            },
+          },
+        });
+      }
+    } else if (hasConsecutiveWeekRange) {
+      where.consecutiveWeekCount = {
+        ...(query.consecutiveWeekCountMin !== undefined ? { gte: query.consecutiveWeekCountMin } : {}),
+        ...(query.consecutiveWeekCountMax !== undefined ? { lte: query.consecutiveWeekCountMax } : {}),
+      };
+    }
+    if (query.latestBuyerMedianMin !== undefined || query.latestBuyerMedianMax !== undefined) {
+      where.latestBuyerMedian = {
+        ...(query.latestBuyerMedianMin !== undefined && Number.isFinite(query.latestBuyerMedianMin)
+          ? { gte: new Prisma.Decimal(query.latestBuyerMedianMin) }
+          : {}),
+        ...(query.latestBuyerMedianMax !== undefined && Number.isFinite(query.latestBuyerMedianMax)
+          ? { lte: new Prisma.Decimal(query.latestBuyerMedianMax) }
+          : {}),
+      };
+    }
+    if (query.historyWeekCountMin !== undefined || query.historyWeekCountMax !== undefined) {
+      where.historyWeekCount = {
+        ...(query.historyWeekCountMin !== undefined ? { gte: query.historyWeekCountMin } : {}),
+        ...(query.historyWeekCountMax !== undefined ? { lte: query.historyWeekCountMax } : {}),
+      };
+    }
+
+    const [items, total] = await Promise.all([
+      this.prisma.productBoardStats.findMany({
+        where,
+        orderBy: { latestBuyerMedian: { sort: "desc", nulls: "last" } },
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+        include: {
+          product: {
+            include: {
+              favorites: {
+                where: { user: memberWhere },
+                orderBy: { createdAt: "desc" },
+                include: { user: { select: { id: true, name: true, username: true, department: true } } },
+              },
+            },
+          },
+        },
+      }),
+      this.prisma.productBoardStats.count({ where }),
+    ]);
+    const productIds = items.map((item) => item.productId);
+    const [historyRows, adminFavorites] = await Promise.all([
+      productIds.length ? this.prisma.productHistory.findMany({
+        where: { productId: { in: productIds }, boardType },
+        select: { productId: true, weekStart: true, weekEnd: true, buyerRaw: true, buyerMin: true, buyerMax: true, buyerMedian: true, exportTime: true, categoryName: true },
+      }) : [],
+      productIds.length ? this.prisma.productFavorite.findMany({
+        where: { userId: query.adminUserId, productId: { in: productIds } },
+        select: { productId: true },
+      }) : [],
+    ]);
+    historyRows.sort((a, b) => a.productId.localeCompare(b.productId)
+      || a.weekStart.getTime() - b.weekStart.getTime()
+      || (b.exportTime?.getTime() ?? 0) - (a.exportTime?.getTime() ?? 0)
+      || a.categoryName.localeCompare(b.categoryName));
+    const trendByProduct = new Map<string, Array<{ weekStart: string; weekEnd: string; raw: string | null; min: number | null; max: number | null; median: number | null }>>();
+    const seenProductWeeks = new Set<string>();
+    for (const row of historyRows) {
+      const weekKey = row.productId + "|" + row.weekStart.toISOString().slice(0, 10);
+      if (seenProductWeeks.has(weekKey)) continue;
+      seenProductWeeks.add(weekKey);
+      const trend = trendByProduct.get(row.productId) ?? [];
+      trend.push({
+        weekStart: row.weekStart.toISOString(),
+        weekEnd: row.weekEnd.toISOString(),
+        raw: row.buyerRaw,
+        min: row.buyerMin === null ? null : Number(row.buyerMin),
+        max: row.buyerMax === null ? null : Number(row.buyerMax),
+        median: row.buyerMedian === null ? null : Number(row.buyerMedian),
+      });
+      trendByProduct.set(row.productId, trend);
+    }
+    const adminFavoriteIds = new Set(adminFavorites.map((row) => row.productId));
+    return {
+      items: items.map((item) => ({
+        ...mapProduct(item, item.product),
+        isFavorited: adminFavoriteIds.has(item.productId),
+        buyerTrend: (trendByProduct.get(item.productId) ?? []).slice(-12),
+        favoriteCount: item.product.favorites.length,
+        favoriteUsers: item.product.favorites.map((favorite) => ({
+          userId: favorite.user.id,
+          name: favorite.user.name,
+          username: favorite.user.username,
+          department: favorite.user.department,
+          favoritedAt: favorite.createdAt.toISOString(),
+        })),
+      })),
+      page,
+      pageSize,
+      total,
+      totalPages: Math.ceil(total / pageSize),
+    };
+  }
+
+  async periods(boardType: "NEW_PRODUCT_TRAFFIC" | "TRANSACTION_GROWTH" = "NEW_PRODUCT_TRAFFIC") {
+    const rows = await this.prisma.productHistory.findMany({
+      where: { boardType },
+      distinct: ["weekStart"],
+      orderBy: { weekStart: "desc" },
+      select: { weekStart: true },
+    });
+    return { periods: rows.map((row) => row.weekStart.toISOString().slice(0, 10)) };
+  }
+
+  async categories(level1?: string[], boardType: "NEW_PRODUCT_TRAFFIC" | "TRANSACTION_GROWTH" = "NEW_PRODUCT_TRAFFIC") {
+    const selectedLevel1 = [...new Set(level1 ?? [])].filter(Boolean);
+    const rows = await this.prisma.productHistory.groupBy({
+      by: ["categoryLevel1", "categoryLevel2"],
+      where: { boardType },
+      orderBy: [{ categoryLevel1: "asc" }, { categoryLevel2: "asc" }],
+    });
+    return {
+      level1: [...new Set(rows.map((row) => row.categoryLevel1))],
+      level2: selectedLevel1.length
+        ? [...new Set(rows.filter((row) => selectedLevel1.includes(row.categoryLevel1)).map((row) => row.categoryLevel2))]
+        : [],
+    };
+  }
+
+  async detail(productId: string, boardType: "NEW_PRODUCT_TRAFFIC" | "TRANSACTION_GROWTH" = "NEW_PRODUCT_TRAFFIC") {
+    const product = await this.prisma.product.findUnique({
+      where: { productId },
+      include: {
+        histories: {
+          where: { boardType },
+          orderBy: [{ weekStart: "asc" }, { exportTime: "asc" }],
+        },
+        boardStats: { where: { boardType } },
+      },
+    });
+    const stats = product?.boardStats[0];
+    if (!product || !stats) throw new NotFoundException("该商品在当前榜单中没有历史记录。");
+    const histories = product.histories.map((row) => ({
+      id: row.id,
+      weekStart: row.weekStart.toISOString(),
+      weekEnd: row.weekEnd.toISOString(),
+      categoryName: row.categoryName,
+      categoryLevel1: row.categoryLevel1,
+      categoryLevel2: row.categoryLevel2,
+      rank: row.rank,
+      trend: row.trend,
+      visitor: range(row.visitorRaw, row.visitorMin, row.visitorMax, row.visitorMedian),
+      buyer: range(row.buyerRaw, row.buyerMin, row.buyerMax, row.buyerMedian),
+      exportTime: row.exportTime?.toISOString() ?? null,
+      sourceFileName: row.sourceFileName,
+    }));
+    return { product: mapProduct(stats, product), histories };
+  }
+
+  async periodsLegacy() {
     const rows = await this.prisma.productHistory.findMany({
       distinct: ["weekStart"],
       orderBy: { weekStart: "desc" },
@@ -526,7 +934,7 @@ export class ProductsService {
     return { productId, isFavorited: false };
   }
 
-  async categories(level1?: string[]) {
+  async categoriesLegacy(level1?: string[]) {
     const selectedLevel1 = [...new Set(level1 ?? [])].filter(Boolean);
     const rows = await this.prisma.category.findMany({
       // 一级类目选项必须始终完整返回；选中项只用于收窄二级类目选项。
@@ -542,7 +950,7 @@ export class ProductsService {
     };
   }
 
-  async detail(productId: string) {
+  async detailLegacy(productId: string) {
     const product = await this.prisma.product.findUnique({
       where: { productId },
       include: { histories: { orderBy: [{ weekStart: "asc" }, { exportTime: "asc" }] } },

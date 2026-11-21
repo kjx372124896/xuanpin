@@ -1,0 +1,3 @@
+UPDATE "导入文件表"
+SET "榜单类型" = 'NEW_PRODUCT_TRAFFIC'
+WHERE "榜单类型" IS NULL AND "周开始日期" IS NOT NULL;

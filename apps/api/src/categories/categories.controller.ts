@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Patch, Post } from "@nestjs/common";
+import { BadRequestException, Body, Controller, Get, Param, Patch, Post, Query } from "@nestjs/common";
 import { IsOptional, IsString, MaxLength, MinLength } from "class-validator";
 import { Roles } from "../auth/auth.decorators";
 import { CategoriesService } from "./categories.service";
@@ -18,8 +18,11 @@ export class CategoriesController {
   constructor(private readonly categoriesService: CategoriesService) {}
 
   @Get("overview")
-  overview() {
-    return this.categoriesService.overview();
+  overview(@Query("boardType") boardType?: string) {
+    if (boardType && boardType !== "NEW_PRODUCT_TRAFFIC" && boardType !== "TRANSACTION_GROWTH") {
+      throw new BadRequestException("榜单类型无效。");
+    }
+    return this.categoriesService.overview(boardType as "NEW_PRODUCT_TRAFFIC" | "TRANSACTION_GROWTH" | undefined);
   }
 
   @Roles("ADMIN", "SUPER_ADMIN")

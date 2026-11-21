@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { CategoriesService } from "./categories.service";
 
 test("类目登记表返回12周进度，并让二级类目继承一级负责人", async () => {
+  const groupedBoardTypes: string[] = [];
   const prisma = {
     category: {
       findMany: async () => [
@@ -44,7 +45,8 @@ test("类目登记表返回12周进度，并让二级类目继承一级负责人
       findMany: async () => [{ id: "employee-1", name: "张三", department: "选品一组" }],
     },
     productHistory: {
-      groupBy: async (args: { where: { weekStart: { in: Date[] } } }) => {
+      groupBy: async (args: { where: { boardType: string; weekStart: { in: Date[] } } }) => {
+        groupedBoardTypes.push(args.where.boardType);
         const weeks = args.where.weekStart.in;
         return [
           {
@@ -70,7 +72,8 @@ test("类目登记表返回12周进度，并让二级类目继承一级负责人
     },
   };
 
-  const result = await new CategoriesService(prisma as never).overview();
+  const result = await new CategoriesService(prisma as never).overview("TRANSACTION_GROWTH");
+  assert.deepEqual(groupedBoardTypes, ["TRANSACTION_GROWTH"]);
   assert.equal(result.periods.length, 12);
 
   const parent = result.categories.find((item) => item.categoryLevel1 === "家居收纳");

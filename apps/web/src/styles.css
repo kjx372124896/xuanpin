@@ -245,7 +245,9 @@ a { color: #315efb; }
 .table-card-products > .ant-card-body { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; overflow: hidden; padding: 12px 14px 6px; }
 .table-card-products .table-heading { flex: 0 0 auto; margin-bottom: 9px; }
 .table-card-products .table-heading { flex-direction: row; align-items: center; }
-.table-card-products .table-heading h4.ant-typography { font-size: 15px; margin-bottom: 2px; }
+.table-heading-title { display: flex; flex: 0 0 auto; min-width: 0; align-items: center; gap: 12px; }
+.table-heading-copy { display: flex; min-width: 0; flex-direction: column; gap: 3px; }
+.table-card-products .table-heading-title h4.ant-typography { font-size: 15px; margin: 0; white-space: nowrap; }
 .table-card-products .table-heading .ant-typography-secondary { font-size: 11px; }
 .table-heading-actions { display: flex; align-items: center; justify-content: flex-end; gap: 10px; margin-left: auto; min-width: 0; }
 .table-heading-actions .ant-pagination { margin: 0; white-space: nowrap; }
@@ -268,8 +270,8 @@ a { color: #315efb; }
 .dmp-pair-actions { margin-top: 14px; }
 .dmp-pair-code { display: inline-grid; gap: 3px; justify-items: start; margin-top: 12px; padding: 14px 18px; border: 1px dashed #9aafd9; border-radius: 12px; background: #f6f8ff; }
 .dmp-pair-code-value { margin: 0 !important; letter-spacing: 5px; font-variant-numeric: tabular-nums; }
-.table-card-products .products-table-scroll { flex: 1 1 0; height: 0; min-height: 0; overflow: hidden; }
-.table-card-products .ant-table-wrapper { height: 100%; min-height: 0; overflow: hidden; }
+.table-card-products .products-table-scroll { flex: 1 1 auto; height: auto; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+.table-card-products .ant-table-wrapper { flex: 1 1 auto; height: 100%; min-height: 0; overflow: hidden; }
 .table-card-products .ant-table-body { overscroll-behavior: contain; }
 .product-row-selection-cell { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; min-width: 100%; }
 .product-row-index { color: #8792a8; font-size: 11px; line-height: 1; font-variant-numeric: tabular-nums; }

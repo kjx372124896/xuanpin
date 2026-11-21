@@ -19,18 +19,19 @@ function categoryRegistryName(level1: string, level2: string) {
   const marker = `~${digest}${suffix}`;
   return `${Array.from(level1).slice(0, 255 - Array.from(marker).length).join("")}${marker}`;
 }
-function businessKey(row: Pick<ParsedImportRow, "productId" | "weekStart" | "categoryName">) {
-  return `${row.productId}|${dayKey(row.weekStart)}|${row.categoryName}`;
+function businessKey(row: Pick<ParsedImportRow, "boardType" | "productId" | "weekStart" | "categoryName">) {
+  return `${row.boardType}|${row.productId}|${dayKey(row.weekStart)}|${row.categoryName}`;
 }
 function historyData(item: RowWithFile): Prisma.ProductHistoryCreateManyInput {
   const { row, fileId, fileName } = item;
   return {
-    productId: row.productId, weekStart: row.weekStart, weekEnd: row.weekEnd, rawPeriod: row.rawPeriod,
+    productId: row.productId, boardType: row.boardType, weekStart: row.weekStart, weekEnd: row.weekEnd, rawPeriod: row.rawPeriod,
     categoryName: row.categoryName, categoryLevel1: row.categoryLevel1, categoryLevel2: row.categoryLevel2,
     rank: row.rank, trend: row.trend,
     visitorRaw: row.visitor.raw, visitorMin: row.visitor.min, visitorMax: row.visitor.max, visitorMedian: row.visitor.median,
     buyerRaw: row.buyer.raw, buyerMin: row.buyer.min, buyerMax: row.buyer.max, buyerMedian: row.buyer.median,
     cartRaw: row.cart.raw, cartMin: row.cart.min, cartMax: row.cart.max, cartMedian: row.cart.median,
+    productKeyword: row.productKeyword,
     exportTime: row.exportTime, sourceFileId: fileId, sourceFileName: row.sourceName || fileName,
     sourceRowNumber: row.sourceRowNumber,
   };
@@ -76,6 +77,7 @@ export class ImportsService implements OnModuleInit {
       const record = await this.prisma.importFile.create({
         data: {
           batchId: batch.id, originalName: file.originalname, sha256: hash, fileSize: BigInt(file.size),
+          boardType: parsed?.boardType ?? null,
           sheetName: parsed?.sheetName, weekStart: parsed?.weekStart, weekEnd: parsed?.weekEnd,
           categoryName: parsed?.categoryName, rowCount, errorCount: rowErrors.length, status,
           storagePath: file.path, sourceName: parsed?.sourceNames.join("；") || null,
@@ -93,6 +95,7 @@ export class ImportsService implements OnModuleInit {
       }
       fileSummaries.push({
         id: record.id, originalName: record.originalName, status, sheetName: record.sheetName,
+        boardType: parsed?.boardType ?? null,
         weekStart: record.weekStart ? dayKey(record.weekStart) : null,
         weekEnd: record.weekEnd ? dayKey(record.weekEnd) : null,
         categoryName: record.categoryName, rowCount, validRows: previous ? 0 : parsed?.rows.length ?? 0,
@@ -123,7 +126,7 @@ export class ImportsService implements OnModuleInit {
   async listBatches() {
     return this.prisma.importBatch.findMany({
       take: 50, orderBy: { createdAt: "desc" },
-      include: { files: { select: { id: true, originalName: true, weekStart: true, weekEnd: true, categoryName: true, rowCount: true, importedCount: true, errorCount: true, status: true } } },
+      include: { files: { select: { id: true, originalName: true, boardType: true, weekStart: true, weekEnd: true, categoryName: true, rowCount: true, importedCount: true, errorCount: true, status: true } } },
     });
   }
 
@@ -223,10 +226,13 @@ export class ImportsService implements OnModuleInit {
 
         const starts = [...new Map(allRows.map((item) => [dayKey(item.row.weekStart), item.row.weekStart])).values()];
         const existing = await this.prisma.productHistory.findMany({
-          where: { productId: { in: productIds }, weekStart: { in: starts }, categoryName: { in: categoryNames } },
-          select: { id: true, productId: true, weekStart: true, categoryName: true, exportTime: true },
+          where: {
+            productId: { in: productIds }, weekStart: { in: starts }, categoryName: { in: categoryNames },
+            boardType: { in: [...new Set(allRows.map((item) => item.row.boardType))] },
+          },
+          select: { id: true, boardType: true, productId: true, weekStart: true, categoryName: true, exportTime: true },
         });
-        const existingMap = new Map(existing.map((row) => [`${row.productId}|${dayKey(row.weekStart)}|${row.categoryName}`, row]));
+        const existingMap = new Map(existing.map((row) => [`${row.boardType}|${row.productId}|${dayKey(row.weekStart)}|${row.categoryName}`, row]));
         const toCreate: Prisma.ProductHistoryCreateManyInput[] = [];
         const toUpdate: Array<{ id: string; data: Prisma.ProductHistoryUpdateInput }> = [];
         for (const item of allRows) {
@@ -254,44 +260,66 @@ export class ImportsService implements OnModuleInit {
         const idsSql = Prisma.join(productIds);
         await this.prisma.$executeRaw(Prisma.sql`
           WITH latest AS (
-            SELECT DISTINCT ON (h."商品ID") h."商品ID", h."周开始日期", h."周结束日期", h."类目名称", h."行业排名",
+            SELECT DISTINCT ON (h."商品ID", h."榜单类型") h."商品ID", h."榜单类型", h."周开始日期", h."周结束日期", h."类目名称", h."行业排名",
               h."一级类目", h."二级类目",
               h."访客数原值", h."访客数下限", h."访客数上限", h."访客数中值",
-              h."支付买家数原值", h."支付买家数下限", h."支付买家数上限", h."支付买家数中值",
-              h."加购人数原值", h."加购人数下限", h."加购人数上限", h."加购人数中值"
+              h."支付买家数原值", h."支付买家数下限", h."支付买家数上限", h."支付买家数中值"
             FROM "商品上榜历史表" h WHERE h."商品ID" IN (${idsSql})
-            ORDER BY h."商品ID", h."周开始日期" DESC, h."导出时间" DESC NULLS LAST, h."导入时间" DESC, h."类目名称" ASC
+            ORDER BY h."商品ID", h."榜单类型", h."周开始日期" DESC, h."导出时间" DESC NULLS LAST, h."导入时间" DESC, h."类目名称" ASC
           ),
           counts AS (
-            SELECT h."商品ID", MIN(h."周开始日期") AS first_week, COUNT(*)::int AS record_count,
+            SELECT h."商品ID", h."榜单类型", MIN(h."周开始日期") AS first_week, COUNT(*)::int AS record_count,
               COUNT(DISTINCT h."周开始日期")::int AS week_count
-            FROM "商品上榜历史表" h WHERE h."商品ID" IN (${idsSql}) GROUP BY h."商品ID"
+            FROM "商品上榜历史表" h WHERE h."商品ID" IN (${idsSql}) GROUP BY h."商品ID", h."榜单类型"
           ),
           week_rows AS (
-            SELECT DISTINCT h."商品ID", h."周开始日期",
-              ROW_NUMBER() OVER (PARTITION BY h."商品ID" ORDER BY h."周开始日期" DESC) AS rn,
-              MAX(h."周开始日期") OVER (PARTITION BY h."商品ID") AS latest_week
+            SELECT DISTINCT h."商品ID", h."榜单类型", h."周开始日期",
+              ROW_NUMBER() OVER (PARTITION BY h."商品ID", h."榜单类型" ORDER BY h."周开始日期" DESC) AS rn,
+              MAX(h."周开始日期") OVER (PARTITION BY h."商品ID", h."榜单类型") AS latest_week
             FROM "商品上榜历史表" h WHERE h."商品ID" IN (${idsSql})
           ),
           streak AS (
-            SELECT "商品ID", COUNT(*) FILTER (
+            SELECT "商品ID", "榜单类型", COUNT(*) FILTER (
               WHERE "周开始日期" = latest_week - ((rn - 1) * INTERVAL '7 days')
             )::int AS streak_count
-            FROM week_rows GROUP BY "商品ID"
+            FROM week_rows GROUP BY "商品ID", "榜单类型"
           )
-          UPDATE "商品主表" p SET
-            "首次上榜日期" = c.first_week, "最近上榜日期" = l."周开始日期", "最近上榜结束日期" = l."周结束日期",
-            "最近行业排名" = l."行业排名", "最新类目名称" = l."类目名称",
-            "最新一级类目" = l."一级类目", "最新二级类目" = l."二级类目",
-            "历史上榜周数" = c.week_count, "历史记录条数" = c.record_count,
-            "连续上榜周数" = COALESCE(s.streak_count, 0),
-            "最新访客数原值" = l."访客数原值", "最新访客数下限" = l."访客数下限", "最新访客数上限" = l."访客数上限", "最新访客数中值" = l."访客数中值",
-            "最新支付买家数原值" = l."支付买家数原值", "最新支付买家数下限" = l."支付买家数下限", "最新支付买家数上限" = l."支付买家数上限", "最新支付买家数中值" = l."支付买家数中值",
-            "最新加购人数原值" = l."加购人数原值", "最新加购人数下限" = l."加购人数下限", "最新加购人数上限" = l."加购人数上限", "最新加购人数中值" = l."加购人数中值",
+          INSERT INTO "商品榜单统计表" (
+            "商品ID", "榜单类型", "最新类目名称", "最新一级类目", "最新二级类目",
+            "首次上榜日期", "最近上榜日期", "最近上榜结束日期", "最近行业排名",
+            "历史上榜周数", "历史记录条数", "连续上榜周数",
+            "最新访客数原值", "最新访客数下限", "最新访客数上限", "最新访客数中值",
+            "最新支付买家数原值", "最新支付买家数下限", "最新支付买家数上限", "最新支付买家数中值", "更新时间"
+          )
+          SELECT
+            l."商品ID", l."榜单类型", l."类目名称", l."一级类目", l."二级类目",
+            c.first_week, l."周开始日期", l."周结束日期", l."行业排名",
+            c.week_count, c.record_count, COALESCE(s.streak_count, 0),
+            l."访客数原值", l."访客数下限", l."访客数上限", l."访客数中值",
+            l."支付买家数原值", l."支付买家数下限", l."支付买家数上限", l."支付买家数中值", now()
+          FROM latest l
+          JOIN counts c ON c."商品ID" = l."商品ID" AND c."榜单类型" = l."榜单类型"
+          LEFT JOIN streak s ON s."商品ID" = l."商品ID" AND s."榜单类型" = l."榜单类型"
+          ON CONFLICT ("商品ID", "榜单类型") DO UPDATE SET
+            "最新类目名称" = EXCLUDED."最新类目名称",
+            "最新一级类目" = EXCLUDED."最新一级类目",
+            "最新二级类目" = EXCLUDED."最新二级类目",
+            "首次上榜日期" = EXCLUDED."首次上榜日期",
+            "最近上榜日期" = EXCLUDED."最近上榜日期",
+            "最近上榜结束日期" = EXCLUDED."最近上榜结束日期",
+            "最近行业排名" = EXCLUDED."最近行业排名",
+            "历史上榜周数" = EXCLUDED."历史上榜周数",
+            "历史记录条数" = EXCLUDED."历史记录条数",
+            "连续上榜周数" = EXCLUDED."连续上榜周数",
+            "最新访客数原值" = EXCLUDED."最新访客数原值",
+            "最新访客数下限" = EXCLUDED."最新访客数下限",
+            "最新访客数上限" = EXCLUDED."最新访客数上限",
+            "最新访客数中值" = EXCLUDED."最新访客数中值",
+            "最新支付买家数原值" = EXCLUDED."最新支付买家数原值",
+            "最新支付买家数下限" = EXCLUDED."最新支付买家数下限",
+            "最新支付买家数上限" = EXCLUDED."最新支付买家数上限",
+            "最新支付买家数中值" = EXCLUDED."最新支付买家数中值",
             "更新时间" = now()
-          FROM latest l JOIN counts c ON c."商品ID" = l."商品ID"
-          LEFT JOIN streak s ON s."商品ID" = l."商品ID"
-          WHERE p."商品ID" = l."商品ID"
         `);
       }
 

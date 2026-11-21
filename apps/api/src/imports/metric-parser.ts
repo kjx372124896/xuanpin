@@ -28,6 +28,9 @@ export function parseMetric(value: unknown): ParsedMetric {
     return { raw: null, min: null, max: null, median: null, valid: false };
   }
   const raw = String(value).trim();
+  // Some market exports encode an unavailable metric as an empty object.
+  // Keep it unknown (null), never coerce it to zero or reject the whole row.
+  if (raw === "{}") return { raw: null, min: null, max: null, median: null, valid: true };
   const normalized = raw.replace(/[～〜—–－-]/g, "~").replace(/至|到/g, "~").replace(/\s+/g, " ");
   const parts = normalized.split("~");
   if (parts.length > 2) return { raw, min: null, max: null, median: null, valid: false };

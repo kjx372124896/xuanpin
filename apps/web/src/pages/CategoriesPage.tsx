@@ -76,6 +76,7 @@ export function CategoriesPage() {
   const queryClient = useQueryClient();
   const isAdmin = user?.role === "ADMIN" || user?.role === "SUPER_ADMIN";
   const [mineOnly, setMineOnly] = useState(false);
+  const [boardType, setBoardType] = useState<"NEW_PRODUCT_TRAFFIC" | "TRANSACTION_GROWTH">("NEW_PRODUCT_TRAFFIC");
   const [statusFilter, setStatusFilter] = useState<"ALL" | "INCOMPLETE">("ALL");
   const [search, setSearch] = useState("");
   const [categoryModalOpen, setCategoryModalOpen] = useState(false);
@@ -83,11 +84,19 @@ export function CategoriesPage() {
   const [form] = Form.useForm();
 
   const overviewQuery = useQuery({
-    queryKey: ["categoriesOverview"],
-    queryFn: async () => (await api.get<CategoriesOverview>("/categories/overview")).data,
+    queryKey: ["categoriesOverview", boardType],
+    queryFn: async () => (await api.get<CategoriesOverview>("/categories/overview", { params: { boardType } })).data,
     staleTime: 30_000,
   });
   const overview = overviewQuery.data;
+  const summary = useMemo(() => {
+    const categories = (overview?.categories ?? []).flatMap((parent) => parent.children.length
+      ? parent.children.map((child) => ({ complete: Boolean(overview?.periods.length) && child.weekCounts.length === overview!.periods.length && child.weekCounts.every((week) => week.count > 0) }))
+      : [{ complete: Boolean(overview?.periods.length) && parent.weekProgress.length === overview!.periods.length && parent.weekProgress.every((week) => week.total > 0 && week.imported === week.total) }]);
+    const total = categories.length;
+    const complete = categories.filter((item) => item.complete).length;
+    return { total, complete, incomplete: total - complete, rate: total ? Math.round((complete / total) * 1000) / 10 : 0 };
+  }, [overview]);
   const employeeOptions = (overview?.employees ?? []).map((employee) => ({
     value: employee.id,
     label: employee.department ? `${employee.name}（${employee.department}）` : employee.name,
@@ -313,7 +322,7 @@ export function CategoriesPage() {
         <div>
           <div className="eyebrow">CATEGORY TRACKING</div>
           <Typography.Title level={2}>类目管理</Typography.Title>
-          <Typography.Text type="secondary">查看所有类目最近12周的数据导入情况，缺失周期一目了然。</Typography.Text>
+          <Typography.Text type="secondary">分别查看新品流量和交易增速最近12周的导入情况，缺失周期一目了然。</Typography.Text>
         </div>
         {isAdmin && (
           <Space wrap>
@@ -323,9 +332,21 @@ export function CategoriesPage() {
         )}
       </div>
 
+      <div className="import-summary-grid category-summary-grid">
+        <div><span>统计类目</span><strong>{summary.total}</strong></div>
+        <div><span>最近12周已完成</span><strong>{summary.complete}</strong></div>
+        <div><span>最近12周未完成</span><strong>{summary.incomplete}</strong></div>
+        <div><span>整体完成率</span><strong>{summary.rate}%</strong></div>
+      </div>
+
       <Card bordered={false} className="table-card category-table-card">
         <div className="category-toolbar">
           <Space wrap size={10}>
+            <Segmented
+              value={boardType}
+              options={[{ label: "新品流量", value: "NEW_PRODUCT_TRAFFIC" }, { label: "交易增速", value: "TRANSACTION_GROWTH" }]}
+              onChange={(value) => setBoardType(value as "NEW_PRODUCT_TRAFFIC" | "TRANSACTION_GROWTH")}
+            />
             <Segmented
               value={mineOnly ? "mine" : "all"}
               options={[{ label: "全部类目", value: "all" }, { label: "我负责的类目", value: "mine" }]}

@@ -30,7 +30,7 @@ function lastTwelveCompletedWeeks(now = new Date()) {
 export class CategoriesService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async overview() {
+  async overview(boardType: "NEW_PRODUCT_TRAFFIC" | "TRANSACTION_GROWTH" = "NEW_PRODUCT_TRAFFIC") {
     const [rows, employees] = await Promise.all([
       this.prisma.category.findMany({
         where: { enabled: true },
@@ -47,7 +47,7 @@ export class CategoriesService {
     const periods = lastTwelveCompletedWeeks();
     const grouped = await this.prisma.productHistory.groupBy({
       by: ["categoryLevel1", "categoryLevel2", "weekStart"],
-      where: { weekStart: { in: periods.map((period) => period.weekStart) } },
+      where: { boardType, weekStart: { in: periods.map((period) => period.weekStart) } },
       _count: { _all: true },
     });
     const countMap = new Map<string, number>();
