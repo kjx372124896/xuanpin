@@ -1,6 +1,15 @@
+import axios from "axios";
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import type { SafeUser } from "@selection/shared";
 import { api } from "../api";
+
+const AUTH_STARTUP_RETRY_DELAYS = [500, 1000, 1500];
+
+function isTransientNetworkError(error: unknown) {
+  if (!axios.isAxiosError(error)) return false;
+  if (error.response) return error.response.status >= 500;
+  return error.code === "ERR_NETWORK" || error.code === "ECONNREFUSED";
+}
 
 interface AuthContextValue {
   user: SafeUser | null;
@@ -22,10 +31,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const refresh = useCallback(async () => {
     try {
-      const response = await api.get("/auth/me");
-      setUser(response.data.user as SafeUser);
-    } catch {
-      setUser(null);
+      for (let attempt = 0; ; attempt += 1) {
+        try {
+          const response = await api.get("/auth/me");
+          setUser(response.data.user as SafeUser);
+          return;
+        } catch (error) {
+          const retryDelay = AUTH_STARTUP_RETRY_DELAYS[attempt];
+          if (!isTransientNetworkError(error) || retryDelay === undefined) {
+            setUser(null);
+            return;
+          }
+          await new Promise((resolve) => window.setTimeout(resolve, retryDelay));
+        }
+      }
     } finally {
       setLoading(false);
     }

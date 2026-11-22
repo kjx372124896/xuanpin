@@ -1,5 +1,5 @@
 import { Button, Layout, Menu } from "antd";
-import { AppstoreOutlined, DatabaseOutlined, ImportOutlined, KeyOutlined, LogoutOutlined, SettingOutlined, ShopOutlined } from "@ant-design/icons";
+import { AppstoreOutlined, DatabaseOutlined, ImportOutlined, KeyOutlined, LineChartOutlined, LogoutOutlined, SettingOutlined, ShopOutlined } from "@ant-design/icons";
 import { Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
 
@@ -13,8 +13,10 @@ export function AppLayout() {
   const isAdmin = user?.role === "ADMIN" || user?.role === "SUPER_ADMIN";
   const selectedKey = location.pathname.startsWith("/products/") ? "/" : location.pathname;
   const isProductList = location.pathname === "/";
+  const isCompactDataPage = isProductList || location.pathname === "/search-trends";
   const items = [
     { key: "/", icon: <ShopOutlined />, label: "商品选品" },
+    { key: "/search-trends", icon: <LineChartOutlined />, label: "搜索趋势" },
     { key: "/categories", icon: <AppstoreOutlined />, label: "类目管理" },
     ...(isAdmin ? [{ key: "/dmp-auth", icon: <KeyOutlined />, label: "达摩盘授权 / 后台任务" }] : []),
     ...(user?.role !== "EMPLOYEE" || user.canImport ? [{ key: "/imports", icon: <ImportOutlined />, label: "数据导入" }] : []),
@@ -40,8 +42,8 @@ export function AppLayout() {
         </div>
       </Sider>
       <Layout>
-        {!isProductList && <Header className="app-header"><div className="header-context">市场数据 · 商品趋势 · 周期追踪</div></Header>}
-        <Content className={isProductList ? "app-content app-content-products" : "app-content"}><Outlet /></Content>
+        {!isCompactDataPage && <Header className="app-header"><div className="header-context">市场数据 · 商品趋势 · 周期追踪</div></Header>}
+        <Content className={isCompactDataPage ? "app-content app-content-products" : "app-content"}><Outlet /></Content>
       </Layout>
     </Layout>
   );

@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Alert, Button, Card, Empty, Progress, Space, Table, Tag, Typography, Upload, message } from "antd";
+import { Alert, Button, Card, Empty, Progress, Space, Table, Tag, Tabs, Typography, Upload, message } from "antd";
 import { CheckCircleOutlined, CloudUploadOutlined, FileExcelOutlined, ReloadOutlined } from "@ant-design/icons";
 import type { UploadFile } from "antd/es/upload/interface";
 import dayjs from "dayjs";
 import { api, errorMessage } from "../api";
+import { SearchImportPanel } from "../components/SearchImportPanel";
 
 interface PreviewFile {
   id: string; originalName: string; status: string; sheetName: string | null;
@@ -32,7 +33,7 @@ function previewMetric(metric: PreviewRow["buyer"]) {
   return <div className="metric-summary" title={metric.raw ?? undefined}><span>最小：{format(metric.min)}</span><span>最大：{format(metric.max)}</span><strong>中值：{format(metric.median)}</strong></div>;
 }
 
-export function ImportPage() {
+function ProductImportPanel() {
   const [fileList, setFileList] = useState<UploadFile[]>([]);
   const [preview, setPreview] = useState<PreviewResult | null>(null);
   const [batchId, setBatchId] = useState<string>();
@@ -40,7 +41,7 @@ export function ImportPage() {
   const [confirming, setConfirming] = useState(false);
   const queryClient = useQueryClient();
 
-  const batchesQuery = useQuery({ queryKey: ["imports"], queryFn: async () => (await api.get<ImportBatch[]>("/imports")).data });
+  const batchesQuery = useQuery({ queryKey: ["imports", "PRODUCT_BOARD"], queryFn: async () => (await api.get<ImportBatch[]>("/imports?kind=PRODUCT_BOARD")).data });
   const batchQuery = useQuery({
     queryKey: ["importBatch", batchId],
     queryFn: async () => (await api.get<ImportBatch>(`/imports/${batchId}`)).data,
@@ -158,6 +159,20 @@ export function ImportPage() {
           { title: "操作", key: "action", width: 90, render: (_: unknown, row: ImportBatch) => <Button size="small" onClick={() => { setBatchId(row.id); setPreview(null); }}>查看批次</Button> },
         ]} />
       </Card>
+    </div>
+  );
+}
+
+export function ImportPage() {
+  return (
+    <div className="page-stack">
+      <Tabs
+        defaultActiveKey="PRODUCT_BOARD"
+        items={[
+          { key: "PRODUCT_BOARD", label: "商品榜单", children: <ProductImportPanel /> },
+          { key: "SEARCH_BOARD", label: "搜索榜单", children: <SearchImportPanel /> },
+        ]}
+      />
     </div>
   );
 }

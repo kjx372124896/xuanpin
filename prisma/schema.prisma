@@ -50,6 +50,13 @@ enum ImportFileStatus {
   @@map("导入文件状态")
 }
 
+enum ImportKind {
+  PRODUCT_BOARD
+  SEARCH_BOARD
+
+  @@map("导入类型")
+}
+
 enum BoardType {
   NEW_PRODUCT_TRAFFIC
   TRANSACTION_GROWTH
@@ -203,6 +210,7 @@ model Category {
 model ImportBatch {
   id               String            @id @default(cuid()) @map("批次ID") @db.VarChar(30)
   operatorId       String?           @map("操作人ID") @db.VarChar(30)
+  importKind       ImportKind        @default(PRODUCT_BOARD) @map("导入类型")
   status           ImportBatchStatus @default(PREVIEW) @map("批次状态")
   totalFiles       Int               @default(0) @map("总文件数")
   totalRows        Int               @default(0) @map("总数据行数")
@@ -223,29 +231,67 @@ model ImportBatch {
 }
 
 model ImportFile {
-  id            String           @id @default(cuid()) @map("文件记录ID") @db.VarChar(30)
-  batchId       String           @map("批次ID") @db.VarChar(30)
-  originalName  String           @map("原始文件名") @db.Text
-  sha256        String           @map("文件SHA256") @db.Char(64)
-  boardType     BoardType?       @map("榜单类型")
-  fileSize      BigInt           @map("文件大小")
-  sheetName     String?          @map("工作表名称") @db.VarChar(255)
-  weekStart     DateTime?        @map("周开始日期") @db.Date
-  weekEnd       DateTime?        @map("周结束日期") @db.Date
-  categoryName  String?          @map("类目名称") @db.VarChar(255)
-  rowCount      Int              @default(0) @map("原始数据行数")
-  importedCount Int              @default(0) @map("成功行数")
-  errorCount    Int              @default(0) @map("失败行数")
-  status        ImportFileStatus @default(PREVIEW) @map("文件状态")
-  storagePath   String           @map("存储路径") @db.Text
-  sourceName    String?          @map("合并来源文件名") @db.Text
-  errorsJson    String?          @map("错误明细") @db.Text
-  batch         ImportBatch      @relation(fields: [batchId], references: [id], onDelete: Cascade)
-  histories     ProductHistory[]
+  id                 String              @id @default(cuid()) @map("文件记录ID") @db.VarChar(30)
+  batchId            String              @map("批次ID") @db.VarChar(30)
+  originalName       String              @map("原始文件名") @db.Text
+  sha256             String              @map("文件SHA256") @db.Char(64)
+  boardType          BoardType?          @map("榜单类型")
+  fileSize           BigInt              @map("文件大小")
+  sheetName          String?             @map("工作表名称") @db.VarChar(255)
+  weekStart          DateTime?           @map("周开始日期") @db.Date
+  weekEnd            DateTime?           @map("周结束日期") @db.Date
+  periodStart        DateTime?           @map("数据开始日期") @db.Date
+  periodEnd          DateTime?           @map("数据结束日期") @db.Date
+  categoryName       String?             @map("类目名称") @db.VarChar(255)
+  searchCategoryName String?             @map("搜索类目") @db.VarChar(255)
+  searchTermType     String?             @map("搜索词类型") @db.VarChar(80)
+  searchBoardType    String?             @map("搜索榜单类型") @db.VarChar(80)
+  dimension          String?             @map("统计维度") @db.VarChar(20)
+  rowCount           Int                 @default(0) @map("原始数据行数")
+  importedCount      Int                 @default(0) @map("成功行数")
+  errorCount         Int                 @default(0) @map("失败行数")
+  status             ImportFileStatus    @default(PREVIEW) @map("文件状态")
+  storagePath        String              @map("存储路径") @db.Text
+  sourceName         String?             @map("合并来源文件名") @db.Text
+  errorsJson         String?             @map("错误明细") @db.Text
+  batch              ImportBatch         @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  histories          ProductHistory[]
+  searchHistories    SearchTermHistory[]
 
   @@index([sha256])
   @@index([batchId, status])
   @@map("导入文件表")
+}
+
+model SearchTermHistory {
+  id                    String      @id @default(cuid()) @map("搜索历史ID") @db.VarChar(30)
+  searchTerm            String      @map("搜索词") @db.VarChar(500)
+  categoryName          String      @map("类目") @db.VarChar(255)
+  classificationName    String?     @map("分类名称") @db.VarChar(255)
+  searchTermType        String      @map("搜索词类型") @db.VarChar(80)
+  boardType             String      @map("搜索榜单类型") @db.VarChar(80)
+  dimension             String      @default("日") @map("统计维度") @db.VarChar(20)
+  searchDate            DateTime    @map("统计日期") @db.Date
+  rank                  Int?        @map("排名")
+  searchPeopleRaw       String?     @map("搜索人数原值") @db.VarChar(100)
+  searchPeopleMin       Decimal?    @map("搜索人数下限") @db.Decimal(20, 2)
+  searchPeopleMax       Decimal?    @map("搜索人数上限") @db.Decimal(20, 2)
+  searchPeopleMedian    Decimal?    @map("搜索人数中值") @db.Decimal(20, 2)
+  clickRate             String?     @map("点击率") @db.VarChar(100)
+  paymentConversionRate String?     @map("支付转化率") @db.VarChar(100)
+  exportTime            DateTime?   @map("导出时间")
+  sourceFileId          String?     @map("来源文件ID") @db.VarChar(30)
+  sourceFileName        String?     @map("来源文件名") @db.Text
+  sourceRowNumber       Int?        @map("来源行号")
+  importedAt            DateTime    @default(now()) @map("导入时间")
+  sourceFile            ImportFile? @relation(fields: [sourceFileId], references: [id], onDelete: SetNull)
+
+  @@unique([searchTerm, categoryName, searchTermType, boardType, dimension, searchDate], map: "搜索词日历史_业务唯一键")
+  @@index([searchDate, categoryName])
+  @@index([searchTerm, searchDate])
+  @@index([searchTermType, boardType, searchDate])
+  @@index([searchPeopleMedian])
+  @@map("搜索词日历史表")
 }
 
 model User {

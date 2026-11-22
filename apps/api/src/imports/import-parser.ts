@@ -42,7 +42,7 @@ export interface ImportParseResult {
   sourceNames: string[];
 }
 
-async function readWorkbookBuffer(filePath: string) {
+export async function readWorkbookBuffer(filePath: string) {
   const original = await readFile(filePath);
   const archive = unzipSync(original);
   for (const name of Object.keys(archive)) {
@@ -54,7 +54,7 @@ async function readWorkbookBuffer(filePath: string) {
   return Buffer.from(zipSync(archive, { level: 1 }));
 }
 
-function cellText(value: ExcelJS.CellValue | undefined): string {
+export function cellText(value: ExcelJS.CellValue | undefined): string {
   if (value === null || value === undefined) return "";
   if (value instanceof Date) return value.toISOString();
   if (typeof value === "object") {

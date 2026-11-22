@@ -11,6 +11,7 @@ const AdminPage = lazy(() => import("./pages/AdminPage").then((module) => ({ def
 const ImportPage = lazy(() => import("./pages/ImportPage").then((module) => ({ default: module.ImportPage })));
 const DmpAuthPage = lazy(() => import("./pages/DmpAuthPage").then((module) => ({ default: module.DmpAuthPage })));
 const CategoriesPage = lazy(() => import("./pages/CategoriesPage").then((module) => ({ default: module.CategoriesPage })));
+const SearchTrendsPage = lazy(() => import("./pages/SearchTrendsPage").then((module) => ({ default: module.SearchTrendsPage })));
 
 function RequireAuth() {
   const { user, loading } = useAuth();
@@ -39,6 +40,7 @@ export function App() {
       <Route element={<RequireAuth />}>
         <Route element={<AppLayout />}>
           <Route index element={<ProductsPage />} />
+          <Route path="search-trends" element={<Suspense fallback={<div className="loading-screen"><Spin /></div>}><SearchTrendsPage /></Suspense>} />
           <Route path="categories" element={<Suspense fallback={<div className="loading-screen"><Spin /></div>}><CategoriesPage /></Suspense>} />
           <Route path="dmp-auth" element={<RequireAdmin><Suspense fallback={<div className="loading-screen"><Spin /></div>}><DmpAuthPage /></Suspense></RequireAdmin>} />
           <Route path="imports" element={<Suspense fallback={<div className="loading-screen"><Spin /></div>}><RequireImporter /></Suspense>} />

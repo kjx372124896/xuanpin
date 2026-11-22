@@ -1,13 +1,15 @@
 import { Injectable, NotFoundException, OnModuleInit, BadRequestException } from "@nestjs/common";
-import { Prisma, ImportBatchStatus, ImportFileStatus } from "@prisma/client";
+import { Prisma, ImportBatchStatus, ImportFileStatus, ImportKind } from "@prisma/client";
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { PrismaService } from "../prisma/prisma.service";
 import { parseImportWorkbook, type ParsedImportRow } from "./import-parser";
+import { parseSearchImportWorkbook, type ParsedSearchImportRow } from "./search-import-parser";
 import { NO_SECOND_LEVEL_CATEGORY } from "./metric-parser";
 
 type UploadedFile = Express.Multer.File;
 type RowWithFile = { row: ParsedImportRow; fileId: string; fileName: string };
+type SearchRowWithFile = { row: ParsedSearchImportRow; fileId: string; fileName: string };
 
 function sha256(buffer: Buffer) { return createHash("sha256").update(buffer).digest("hex"); }
 function dayKey(date: Date) { return date.toISOString().slice(0, 10); }
@@ -37,6 +39,34 @@ function historyData(item: RowWithFile): Prisma.ProductHistoryCreateManyInput {
   };
 }
 
+function searchBusinessKey(row: ParsedSearchImportRow) {
+  return JSON.stringify([row.searchTerm, row.categoryName, row.searchTermType, row.boardType, row.dimension, dayKey(row.searchDate)]);
+}
+
+function searchHistoryData(item: SearchRowWithFile): Prisma.SearchTermHistoryCreateManyInput {
+  const { row, fileId, fileName } = item;
+  return {
+    searchTerm: row.searchTerm,
+    categoryName: row.categoryName,
+    classificationName: row.classificationName,
+    searchTermType: row.searchTermType,
+    boardType: row.boardType,
+    dimension: row.dimension,
+    searchDate: row.searchDate,
+    rank: row.rank,
+    searchPeopleRaw: row.searchPeople.raw,
+    searchPeopleMin: row.searchPeople.min,
+    searchPeopleMax: row.searchPeople.max,
+    searchPeopleMedian: row.searchPeople.median,
+    clickRate: row.clickRate,
+    paymentConversionRate: row.paymentConversionRate,
+    exportTime: row.exportTime,
+    sourceFileId: fileId,
+    sourceFileName: fileName,
+    sourceRowNumber: row.sourceRowNumber,
+  };
+}
+
 @Injectable()
 export class ImportsService implements OnModuleInit {
   private processing = new Set<string>();
@@ -50,7 +80,108 @@ export class ImportsService implements OnModuleInit {
     for (const batch of queued) setImmediate(() => void this.processBatch(batch.id));
   }
 
-  async createPreview(files: UploadedFile[], operatorId: string) {
+  async createPreview(files: UploadedFile[], operatorId: string, importKind: ImportKind = ImportKind.PRODUCT_BOARD) {
+    if (importKind === ImportKind.SEARCH_BOARD) return this.createSearchPreview(files, operatorId);
+    return this.createProductPreview(files, operatorId);
+  }
+
+  private async createSearchPreview(files: UploadedFile[], operatorId: string) {
+    const batch = await this.prisma.importBatch.create({ data: { operatorId, importKind: ImportKind.SEARCH_BOARD, totalFiles: files.length } });
+    const seenHashes = new Set<string>();
+    const previewRows: Array<Record<string, unknown>> = [];
+    const fileSummaries: Array<Record<string, unknown>> = [];
+    let totalRows = 0;
+    let errorRows = 0;
+
+    for (const file of files) {
+      const hash = sha256(await readFile(file.path));
+      let parsed: Awaited<ReturnType<typeof parseSearchImportWorkbook>> | null = null;
+      let parseError: string | null = null;
+      try {
+        parsed = await parseSearchImportWorkbook(file.path);
+      } catch (error) {
+        parseError = error instanceof Error ? error.message : "搜索榜单 Excel 文件解析失败。";
+      }
+      const previous = seenHashes.has(hash) || Boolean(await this.prisma.importFile.findFirst({
+        where: { sha256: hash, status: "COMPLETED", batch: { importKind: ImportKind.SEARCH_BOARD } },
+        select: { id: true },
+      }));
+      seenHashes.add(hash);
+      const status: ImportFileStatus = parseError ? "FAILED" : previous ? "DUPLICATE" : "PREVIEW";
+      const rowCount = parsed?.rowCount ?? 0;
+      const rowErrors = parsed?.errors ?? [];
+      totalRows += rowCount;
+      errorRows += rowErrors.length;
+      const record = await this.prisma.importFile.create({
+        data: {
+          batchId: batch.id,
+          originalName: file.originalname,
+          sha256: hash,
+          fileSize: BigInt(file.size),
+          sheetName: parsed?.sheetName,
+          periodStart: parsed?.periodStart,
+          periodEnd: parsed?.periodEnd,
+          searchCategoryName: parsed?.searchCategoryName,
+          searchTermType: parsed?.searchTermType,
+          searchBoardType: parsed?.searchBoardType,
+          dimension: parsed?.dimension,
+          rowCount,
+          errorCount: rowErrors.length,
+          status,
+          storagePath: file.path,
+          errorsJson: JSON.stringify({ parseError, errors: rowErrors.slice(0, 200) }),
+        },
+      });
+      if (parsed && !previous) {
+        for (const row of parsed.rows.slice(0, Math.max(0, 20 - previewRows.length))) {
+          previewRows.push({
+            searchTerm: row.searchTerm,
+            categoryName: row.categoryName,
+            classificationName: row.classificationName,
+            searchTermType: row.searchTermType,
+            boardType: row.boardType,
+            dimension: row.dimension,
+            searchDate: dayKey(row.searchDate),
+            rank: row.rank,
+            searchPeople: row.searchPeople,
+          });
+        }
+      }
+      fileSummaries.push({
+        id: record.id,
+        originalName: record.originalName,
+        status,
+        sheetName: record.sheetName,
+        periodStart: record.periodStart ? dayKey(record.periodStart) : null,
+        periodEnd: record.periodEnd ? dayKey(record.periodEnd) : null,
+        searchCategoryName: record.searchCategoryName,
+        searchTermType: record.searchTermType,
+        searchBoardType: record.searchBoardType,
+        dimension: record.dimension,
+        rowCount,
+        validRows: previous ? 0 : parsed?.rows.length ?? 0,
+        errorCount: rowErrors.length,
+        parseError,
+        errors: rowErrors.slice(0, 20),
+      });
+    }
+
+    await this.prisma.importBatch.update({ where: { id: batch.id }, data: { totalRows, errorRows } });
+    return {
+      batchId: batch.id,
+      importKind: ImportKind.SEARCH_BOARD,
+      status: "PREVIEW",
+      totalFiles: files.length,
+      totalRows,
+      validRows: fileSummaries.reduce((sum, item) => sum + (item.status === "PREVIEW" ? Number(item.validRows ?? 0) : 0), 0),
+      errorRows,
+      duplicateFiles: fileSummaries.filter((item) => item.status === "DUPLICATE").length,
+      files: fileSummaries,
+      previewRows,
+    };
+  }
+
+  private async createProductPreview(files: UploadedFile[], operatorId: string) {
     const batch = await this.prisma.importBatch.create({ data: { operatorId, totalFiles: files.length } });
     const seenHashes = new Set<string>();
     const previewRows: Array<Record<string, unknown>> = [];
@@ -123,10 +254,11 @@ export class ImportsService implements OnModuleInit {
     return { batchId, status: "QUEUED", message: "导入任务已加入队列。" };
   }
 
-  async listBatches() {
+  async listBatches(importKind?: ImportKind) {
     return this.prisma.importBatch.findMany({
+      where: importKind ? { importKind } : undefined,
       take: 50, orderBy: { createdAt: "desc" },
-      include: { files: { select: { id: true, originalName: true, boardType: true, weekStart: true, weekEnd: true, categoryName: true, rowCount: true, importedCount: true, errorCount: true, status: true } } },
+      include: { files: { select: { id: true, originalName: true, boardType: true, weekStart: true, weekEnd: true, periodStart: true, periodEnd: true, categoryName: true, searchCategoryName: true, searchTermType: true, searchBoardType: true, dimension: true, rowCount: true, importedCount: true, errorCount: true, status: true } } },
     });
   }
 
@@ -136,12 +268,163 @@ export class ImportsService implements OnModuleInit {
     return { ...batch, files: batch.files.map((file) => ({ ...file, fileSize: file.fileSize.toString() })) };
   }
 
+  private async processSearchBatch(batch: Prisma.ImportBatchGetPayload<{ include: { files: true } }>) {
+    await this.prisma.importBatch.update({ where: { id: batch.id }, data: { status: "PROCESSING", startedAt: new Date() } });
+
+    const allRows: SearchRowWithFile[] = [];
+    const fileErrors = new Map<string, Array<{ row: number; searchTerm?: string; message: string }>>();
+    const fileValidCounts = new Map<string, number>();
+    let errorRows = 0;
+    let duplicateRows = 0;
+
+    for (const file of batch.files) {
+      if (file.status === "DUPLICATE") {
+        duplicateRows += file.rowCount;
+        continue;
+      }
+      if (file.status !== "PREVIEW") continue;
+      await this.prisma.importFile.update({ where: { id: file.id }, data: { status: "PROCESSING" } });
+      const parsed = await parseSearchImportWorkbook(file.storagePath);
+      fileErrors.set(file.id, parsed.errors);
+      errorRows += parsed.errors.length;
+      fileValidCounts.set(file.id, parsed.rows.length);
+      for (const row of parsed.rows) allRows.push({ row, fileId: file.id, fileName: file.originalName });
+    }
+
+    const existingMap = new Map<string, { id: string; exportTime: Date | null }>();
+    if (allRows.length) {
+      const terms = [...new Set(allRows.map((item) => item.row.searchTerm))];
+      const categories = [...new Set(allRows.map((item) => item.row.categoryName))];
+      const termTypes = [...new Set(allRows.map((item) => item.row.searchTermType))];
+      const boardTypes = [...new Set(allRows.map((item) => item.row.boardType))];
+      const dates = [...new Map(allRows.map((item) => [dayKey(item.row.searchDate), item.row.searchDate])).values()];
+      const existing = await this.prisma.searchTermHistory.findMany({
+        where: {
+          searchTerm: { in: terms },
+          categoryName: { in: categories },
+          searchTermType: { in: termTypes },
+          boardType: { in: boardTypes },
+          dimension: "日",
+          searchDate: { in: dates },
+        },
+        select: {
+          id: true,
+          searchTerm: true,
+          categoryName: true,
+          searchTermType: true,
+          boardType: true,
+          dimension: true,
+          searchDate: true,
+          exportTime: true,
+        },
+      });
+      for (const row of existing) {
+        const key = JSON.stringify([row.searchTerm, row.categoryName, row.searchTermType, row.boardType, row.dimension, dayKey(row.searchDate)]);
+        existingMap.set(key, { id: row.id, exportTime: row.exportTime });
+      }
+    }
+
+    const createRows = new Map<string, SearchRowWithFile>();
+    const updateRows = new Map<string, SearchRowWithFile>();
+    for (const item of allRows) {
+      const key = searchBusinessKey(item.row);
+      const existing = existingMap.get(key);
+      if (!existing) {
+        const pending = createRows.get(key);
+        if (!pending) createRows.set(key, item);
+        else if (item.row.exportTime && (!pending.row.exportTime || item.row.exportTime > pending.row.exportTime)) {
+          createRows.set(key, item);
+          duplicateRows += 1;
+        } else duplicateRows += 1;
+        continue;
+      }
+
+      const pendingUpdate = updateRows.get(existing.id);
+      const currentExportTime = pendingUpdate?.row.exportTime ?? existing.exportTime;
+      if (item.row.exportTime && (!currentExportTime || item.row.exportTime > currentExportTime)) {
+        if (pendingUpdate) duplicateRows += 1;
+        updateRows.set(existing.id, item);
+      } else duplicateRows += 1;
+    }
+
+    const fileImportedCounts = new Map<string, number>();
+    for (const item of createRows.values()) fileImportedCounts.set(item.fileId, (fileImportedCounts.get(item.fileId) ?? 0) + 1);
+    for (const item of updateRows.values()) fileImportedCounts.set(item.fileId, (fileImportedCounts.get(item.fileId) ?? 0) + 1);
+
+    let createdHistories = 0;
+    let updatedHistories = 0;
+    const createData = [...createRows.values()].map(searchHistoryData);
+    for (let index = 0; index < createData.length; index += 1000) {
+      const result = await this.prisma.searchTermHistory.createMany({ data: createData.slice(index, index + 1000), skipDuplicates: true });
+      createdHistories += result.count;
+    }
+
+    const updates = [...updateRows.entries()];
+    for (let index = 0; index < updates.length; index += 100) {
+      const chunk = updates.slice(index, index + 100);
+      await Promise.all(chunk.map(([id, item]) => this.prisma.searchTermHistory.update({
+        where: { id },
+        data: {
+          classificationName: item.row.classificationName,
+          rank: item.row.rank,
+          searchPeopleRaw: item.row.searchPeople.raw,
+          searchPeopleMin: item.row.searchPeople.min,
+          searchPeopleMax: item.row.searchPeople.max,
+          searchPeopleMedian: item.row.searchPeople.median,
+          clickRate: item.row.clickRate,
+          paymentConversionRate: item.row.paymentConversionRate,
+          exportTime: item.row.exportTime,
+          sourceFileId: item.fileId,
+          sourceFileName: item.fileName,
+          sourceRowNumber: item.row.sourceRowNumber,
+          importedAt: new Date(),
+        },
+      })));
+      updatedHistories += chunk.length;
+    }
+
+    for (const file of batch.files) {
+      if (file.status === "DUPLICATE") continue;
+      const errors = fileErrors.get(file.id) ?? [];
+      const validCount = fileValidCounts.get(file.id) ?? 0;
+      await this.prisma.importFile.update({
+        where: { id: file.id },
+        data: {
+          status: validCount ? "COMPLETED" : "FAILED",
+          importedCount: fileImportedCounts.get(file.id) ?? 0,
+          errorCount: errors.length,
+          errorsJson: JSON.stringify({ parseError: null, errors: errors.slice(0, 200) }),
+        },
+      });
+    }
+
+    const importedRows = createdHistories + updatedHistories;
+    await this.prisma.importBatch.update({
+      where: { id: batch.id },
+      data: {
+        status: importedRows || duplicateRows ? "COMPLETED" : "FAILED",
+        importedRows,
+        duplicateRows,
+        errorRows,
+        newProducts: 0,
+        createdHistories,
+        updatedHistories,
+        errorSummary: errorRows ? "有 " + errorRows + " 行搜索词数据未通过校验，详情请查看各文件错误明细。" : null,
+        completedAt: new Date(),
+      },
+    });
+  }
+
   private async processBatch(batchId: string) {
     if (this.processing.has(batchId)) return;
     this.processing.add(batchId);
     try {
       const batch = await this.prisma.importBatch.findUnique({ where: { id: batchId }, include: { files: true } });
       if (!batch || batch.status !== "QUEUED") return;
+      if (batch.importKind === ImportKind.SEARCH_BOARD) {
+        await this.processSearchBatch(batch);
+        return;
+      }
       await this.prisma.importBatch.update({ where: { id: batchId }, data: { status: "PROCESSING", startedAt: new Date() } });
 
       const allRows: RowWithFile[] = [];

@@ -1,4 +1,5 @@
-import { BadRequestException, Controller, Get, Param, Post, Req, UploadedFiles, UseInterceptors } from "@nestjs/common";
+import { BadRequestException, Controller, Get, Param, Post, Query, Req, UploadedFiles, UseInterceptors } from "@nestjs/common";
+import { ImportKind } from "@prisma/client";
 import { FilesInterceptor } from "@nestjs/platform-express";
 import { diskStorage } from "multer";
 import path from "node:path";
@@ -6,6 +7,12 @@ import { CanImport } from "../auth/auth.decorators";
 import type { AuthenticatedRequest } from "../auth/request-user";
 import { getUploadRoot } from "../common/paths";
 import { ImportsService } from "./imports.service";
+
+function parseImportKind(value?: string): ImportKind {
+  if (!value || value === ImportKind.PRODUCT_BOARD) return ImportKind.PRODUCT_BOARD;
+  if (value === ImportKind.SEARCH_BOARD) return ImportKind.SEARCH_BOARD;
+  throw new BadRequestException("导入类型无效。");
+}
 
 @Controller("imports")
 export class ImportsController {
@@ -25,9 +32,9 @@ export class ImportsController {
       callback(null, true);
     },
   }))
-  preview(@UploadedFiles() files: Express.Multer.File[], @Req() req: AuthenticatedRequest) {
+  preview(@UploadedFiles() files: Express.Multer.File[], @Req() req: AuthenticatedRequest, @Query("kind") kind?: string) {
     if (!files?.length) throw new BadRequestException("请至少选择一个 Excel 文件。");
-    return this.importsService.createPreview(files, req.user.id);
+    return this.importsService.createPreview(files, req.user.id, parseImportKind(kind));
   }
 
   @CanImport()
@@ -36,7 +43,7 @@ export class ImportsController {
 
   @Get()
   @CanImport()
-  list() { return this.importsService.listBatches(); }
+  list(@Query("kind") kind?: string) { return this.importsService.listBatches(kind ? parseImportKind(kind) : undefined); }
 
   @Get(":batchId")
   @CanImport()
