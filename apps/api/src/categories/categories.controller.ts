@@ -25,6 +25,11 @@ export class CategoriesController {
     return this.categoriesService.overview(boardType as "NEW_PRODUCT_TRAFFIC" | "TRANSACTION_GROWTH" | undefined);
   }
 
+  @Get("search-overview")
+  searchOverview() {
+    return this.categoriesService.searchOverview();
+  }
+
   @Roles("ADMIN", "SUPER_ADMIN")
   @Post()
   create(@Body() dto: CreateCategoryDto) {

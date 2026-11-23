@@ -8,6 +8,10 @@ function dateKey(date: Date) {
   return date.toISOString().slice(0, 10);
 }
 
+function normalizeCategoryName(value: string) {
+  return value.split("/").map((part) => part.trim()).join(" / ");
+}
+
 function lastTwelveCompletedWeeks(now = new Date()) {
   const dayFromMonday = (now.getUTCDay() + 6) % 7;
   const currentWeekStart = Date.UTC(
@@ -136,6 +140,184 @@ export class CategoriesService {
           }
           const recordCount = countMap.get(`${parent.categoryLevel1}\u0000\u0000${period.key}`) ?? 0;
           return { weekStart: period.key, imported: recordCount > 0 ? 1 : 0, total: 1, recordCount };
+        });
+
+        return {
+          id: parent.id,
+          categoryLevel1: parent.categoryLevel1,
+          responsibleUserId: parent.responsibleUserId,
+          responsibleUserName: parent.responsibleUser?.name ?? null,
+          ownerUserId: parent.responsibleUserId,
+          ownerName: parent.responsibleUser?.name ?? null,
+          weekProgress,
+          children,
+        };
+      });
+
+    return {
+      periods: periods.map((period) => ({
+        weekStart: period.key,
+        weekEnd: dateKey(period.weekEnd),
+      })),
+      categories,
+      employees,
+    };
+  }
+
+  async searchOverview() {
+    const [rows, employees] = await Promise.all([
+      this.prisma.category.findMany({
+        where: { enabled: true },
+        include: { responsibleUser: { select: { id: true, name: true } } },
+        orderBy: [{ categoryLevel1: "asc" }, { categoryLevel2: "asc" }],
+      }),
+      this.prisma.user.findMany({
+        where: { role: "EMPLOYEE", employmentStatus: "ACTIVE", accountStatus: "ACTIVE" },
+        select: { id: true, name: true, department: true },
+        orderBy: [{ name: "asc" }],
+      }),
+    ]);
+
+    const periods = lastTwelveCompletedWeeks();
+    const categoryNameMap = new Map(rows.map((row) => [normalizeCategoryName(row.categoryName), row.categoryName]));
+    const categoryNames = [...new Set(rows.flatMap((row) => [row.categoryName, normalizeCategoryName(row.categoryName)]))];
+    const grouped = categoryNames.length
+      ? await this.prisma.searchTermHistory.groupBy({
+        by: ["categoryName", "searchDate"],
+        where: {
+          dimension: "日",
+          categoryName: { in: categoryNames },
+          searchDate: { gte: periods[0].weekStart, lte: periods[11].weekEnd },
+        },
+        _count: { _all: true },
+      })
+      : [];
+
+    const dailyCounts = new Map<string, { daysWithData: number; recordCount: number }>();
+    for (const item of grouped) {
+      const dayFromMonday = (item.searchDate.getUTCDay() + 6) % 7;
+      const weekStart = new Date(Date.UTC(
+        item.searchDate.getUTCFullYear(),
+        item.searchDate.getUTCMonth(),
+        item.searchDate.getUTCDate() - dayFromMonday,
+      ));
+      const categoryName = categoryNameMap.get(normalizeCategoryName(item.categoryName)) ?? item.categoryName;
+      const key = `${categoryName}\u0000${dateKey(weekStart)}`;
+      const current = dailyCounts.get(key) ?? { daysWithData: 0, recordCount: 0 };
+      current.daysWithData += 1;
+      current.recordCount += item._count._all;
+      dailyCounts.set(key, current);
+    }
+
+    type Owner = { id: string; name: string } | null;
+    type Child = {
+      id: string;
+      categoryName: string;
+      categoryLevel2: string;
+      responsibleUserId: string | null;
+      responsibleUser: Owner;
+    };
+    type Parent = {
+      id: string | null;
+      categoryLevel1: string;
+      responsibleUserId: string | null;
+      responsibleUser: Owner;
+      children: Map<string, Child>;
+    };
+
+    const parentMap = new Map<string, Parent>();
+    for (const row of rows) {
+      let parent = parentMap.get(row.categoryLevel1);
+      if (!parent) {
+        parent = {
+          id: null,
+          categoryLevel1: row.categoryLevel1,
+          responsibleUserId: null,
+          responsibleUser: null,
+          children: new Map(),
+        };
+        parentMap.set(row.categoryLevel1, parent);
+      }
+
+      if (row.categoryLevel2 === null) {
+        parent.id = row.id;
+        parent.responsibleUserId = row.responsibleUserId;
+        parent.responsibleUser = row.responsibleUser;
+        continue;
+      }
+
+      const existing = parent.children.get(row.categoryLevel2);
+      if (!existing || (!existing.responsibleUserId && row.responsibleUserId)) {
+        parent.children.set(row.categoryLevel2, {
+          id: row.id,
+          categoryName: row.categoryName,
+          categoryLevel2: row.categoryLevel2,
+          responsibleUserId: row.responsibleUserId,
+          responsibleUser: row.responsibleUser,
+        });
+      }
+    }
+
+    const readCount = (categoryName: string, weekStart: string) =>
+      dailyCounts.get(`${categoryName}\u0000${weekStart}`) ?? { daysWithData: 0, recordCount: 0 };
+
+    const categories = [...parentMap.values()]
+      .sort((a, b) => a.categoryLevel1.localeCompare(b.categoryLevel1, "zh-CN"))
+      .map((parent) => {
+        const children = [...parent.children.values()]
+          .sort((a, b) => a.categoryLevel2.localeCompare(b.categoryLevel2, "zh-CN"))
+          .map((child) => ({
+            id: child.id,
+            categoryLevel1: parent.categoryLevel1,
+            categoryLevel2: child.categoryLevel2,
+            responsibleUserId: child.responsibleUserId,
+            responsibleUserName: child.responsibleUser?.name ?? null,
+            ownerUserId: child.responsibleUserId ?? parent.responsibleUserId,
+            ownerName: child.responsibleUser?.name ?? parent.responsibleUser?.name ?? null,
+            inherited: !child.responsibleUserId && Boolean(parent.responsibleUserId),
+            weekCounts: periods.map((period) => {
+              const own = readCount(child.categoryName, period.key);
+              const parentCount = readCount(parent.categoryLevel1, period.key);
+              const useParent = own.daysWithData === 0 && parentCount.daysWithData > 0;
+              const selected = useParent ? parentCount : own;
+              return {
+                weekStart: period.key,
+                count: selected.daysWithData,
+                daysWithData: selected.daysWithData,
+                recordCount: selected.recordCount,
+                inheritedFromParent: useParent,
+              };
+            }),
+          }));
+
+        const weekProgress = periods.map((period) => {
+          const parentCount = readCount(parent.categoryLevel1, period.key);
+          if (children.length) {
+            const childCounts = children.map((child) =>
+              child.weekCounts.find((week) => week.weekStart === period.key)!,
+            );
+            const imported = childCounts.filter((week) => week.daysWithData === 7).length;
+            const partial = childCounts.filter((week) => week.daysWithData > 0 && week.daysWithData < 7).length;
+            const ownChildRecords = [...parent.children.values()].reduce((sum, child) =>
+              sum + readCount(child.categoryName, period.key).recordCount, 0);
+            return {
+              weekStart: period.key,
+              imported,
+              total: children.length,
+              partial,
+              recordCount: parentCount.recordCount + ownChildRecords,
+            };
+          }
+
+          return {
+            weekStart: period.key,
+            imported: parentCount.daysWithData === 7 ? 1 : 0,
+            total: 1,
+            partial: parentCount.daysWithData > 0 && parentCount.daysWithData < 7 ? 1 : 0,
+            daysWithData: parentCount.daysWithData,
+            totalDays: 7,
+            recordCount: parentCount.recordCount,
+          };
         });
 
         return {

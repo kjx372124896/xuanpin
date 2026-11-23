@@ -285,6 +285,7 @@ a { color: #315efb; }
 .table-card-products .ant-table-tbody > tr > td.ant-table-cell-fix-left { background: #fff; }
 .table-card-products .ant-table-thead > tr > th.ant-table-cell-fix-left { background: #fafbfd; }
 .product-cell { gap: 9px; align-items: center; }
+.products-page .buyer-trend-cell { width: 100%; min-width: 0; max-width: 100%; box-sizing: border-box; }
 
 /* 搜索趋势页沿用商品选品页：紧凑筛选卡片、固定列表卡片、卡片内滚动。 */
 .search-trends-page { height: 100%; min-height: 0; }

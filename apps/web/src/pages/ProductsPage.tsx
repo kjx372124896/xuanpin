@@ -329,6 +329,13 @@ export function ProductsPage() {
     });
   }
 
+  // Keep the scrollable table width in sync with the actual column widths,
+  // including the optional selection and team-favorite columns.
+  const tableScrollX = columns.reduce(
+    (total, column) => total + (typeof column.width === "number" ? column.width : 0),
+    isAdmin ? 48 : 0,
+  );
+
   function applyFilters() { setPage(1); setFilters({ ...draft }); }
   function resetFilters() { setDraft({}); setFilters({}); setPage(1); }
   async function toggleFavorite(item: ProductListItem) {
@@ -543,7 +550,7 @@ export function ProductsPage() {
               ),
             } : undefined}
             loading={activeQuery.isLoading || activeQuery.isFetching}
-            scroll={{ x: teamFavoritesMode && isAdmin ? 2022 : 1872, y: tableScrollY }}
+            scroll={{ x: tableScrollX, y: tableScrollY }}
             size="middle"
             locale={{ emptyText: <Empty description="暂无商品数据，请先导入生意参谋 Excel 榜单" /> }}
             pagination={false}
