@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Alert, Button, Card, DatePicker, Empty, Input, InputNumber, Pagination, Select, Table, Tag, Typography } from "antd";
 import type { ColumnsType } from "antd/es/table";
@@ -98,7 +98,7 @@ function formatDailyAverage(value: number | null) {
   return Math.round(value).toString();
 }
 
-function DailySearchTrend({ points }: { points: SearchTrendPoint[] }) {
+const DailySearchTrend = memo(function DailySearchTrend({ points }: { points: SearchTrendPoint[] }) {
   const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
   const valueOf = (median: number | null, min: number | null, max: number | null) =>
     median ?? (min !== null && max !== null ? (min + max) / 2 : min ?? max);
@@ -166,35 +166,48 @@ function DailySearchTrend({ points }: { points: SearchTrendPoint[] }) {
         <span><i className="buyer-trend-legend-comparison" />对比日期</span>
       </div>
       <div className="buyer-trend-chart-wrap">
-        <svg className="buyer-trend-chart" viewBox={`0 0 ${chartWidth} ${chartHeight}`} preserveAspectRatio="none" role="img" aria-label="统计日期与对比日期的每日搜索人数双折线图">
+        <svg
+          className="buyer-trend-chart"
+          viewBox={`0 0 ${chartWidth} ${chartHeight}`}
+          preserveAspectRatio="none"
+          role="group"
+          tabIndex={0}
+          aria-label={hoveredPoint
+            ? `趋势数据。统计 ${hoveredPoint.point.date ?? "无数据"}：${formatNumber(hoveredPoint.currentValue)}；对比 ${hoveredPoint.point.comparisonDate ?? "无数据"}：${formatNumber(hoveredPoint.comparisonValue)}。使用左右方向键切换日期。`
+            : "每日搜索人数双折线图，蓝色为统计日期，绿色为对比日期。使用左右方向键查看数据。"}
+          onMouseMove={(event) => {
+            const bounds = event.currentTarget.getBoundingClientRect();
+            if (!bounds.width) return;
+            const chartX = ((event.clientX - bounds.left) / bounds.width) * chartWidth;
+            const relativeX = Math.max(0, Math.min(plotWidth, chartX - plot.left));
+            const nextIndex = points.length <= 1 ? 0 : Math.round((relativeX / plotWidth) * (points.length - 1));
+            setHoveredIndex(nextIndex);
+          }}
+          onMouseLeave={() => setHoveredIndex(null)}
+          onFocus={() => setHoveredIndex((current) => current ?? 0)}
+          onBlur={() => setHoveredIndex(null)}
+          onKeyDown={(event) => {
+            if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+            event.preventDefault();
+            setHoveredIndex((current) => Math.max(0, Math.min(points.length - 1, (current ?? 0) + (event.key === "ArrowRight" ? 1 : -1))));
+          }}
+        >
           {[0, 1, 2, 3, 4].map((step) => {
             const value = axisMax * step / 4;
             const y = yFor(value);
             return <g key={step}><line x1={plot.left} y1={y} x2={chartWidth - plot.right} y2={y} stroke="#e9edf5" strokeDasharray="3 3" /><text x={plot.left - 7} y={y + 3} fill="#8792a8" fontSize="9" textAnchor="end">{formatNumber(value)}</text></g>;
           })}
           <line x1={plot.left} y1={plot.top + plotHeight} x2={chartWidth - plot.right} y2={plot.top + plotHeight} stroke="#d9deea" />
-          {hoveredPoint && <line x1={hoveredPoint.x} y1={plot.top} x2={hoveredPoint.x} y2={plot.top + plotHeight} stroke="#aeb7c8" strokeDasharray="3 3" />}
           {currentSegments.map((segment, index) => <path key={`current-${index}`} d={segment.map((point, pointIndex) => `${pointIndex === 0 ? "M" : "L"} ${point.x} ${point.currentY}`).join(" ")} fill="none" stroke="#3478e5" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />)}
           {comparisonSegments.map((segment, index) => <path key={`comparison-${index}`} d={segment.map((point, pointIndex) => `${pointIndex === 0 ? "M" : "L"} ${point.x} ${point.comparisonY}`).join(" ")} fill="none" stroke="#20a36a" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />)}
-          {chartPoints.map((point, index) => (
-            <g
-              key={`${point.point.date ?? point.point.comparisonDate ?? "empty"}-${index}`}
-              tabIndex={0}
-              role="button"
-              aria-label={`统计日期 ${point.point.date ?? "无数据"}，搜索人数 ${formatNumber(point.currentValue)}；对比日期 ${point.point.comparisonDate ?? "无数据"}，搜索人数 ${formatNumber(point.comparisonValue)}`}
-              onMouseEnter={() => setHoveredIndex(index)}
-              onMouseLeave={() => setHoveredIndex(null)}
-              onFocus={() => setHoveredIndex(index)}
-              onBlur={() => setHoveredIndex(null)}
-              style={{ cursor: "crosshair", outline: "none" }}
-            >
-              {point.currentY !== null && <circle cx={point.x} cy={point.currentY} r="3.4" fill="#3478e5" stroke="#fff" strokeWidth="1.2" />}
-              {point.comparisonY !== null && <circle cx={point.x} cy={point.comparisonY} r="3.4" fill="#20a36a" stroke="#fff" strokeWidth="1.2" />}
-              <circle cx={point.x} cy={point.hoverY} r="9" fill="transparent">
-                <title>{`统计 ${point.point.date ?? "—"}：${formatNumber(point.currentValue)}；对比 ${point.point.comparisonDate ?? "—"}：${formatNumber(point.comparisonValue)}`}</title>
-              </circle>
+          {hoveredPoint && (
+            <g pointerEvents="none">
+              <line x1={hoveredPoint.x} y1={plot.top} x2={hoveredPoint.x} y2={plot.top + plotHeight} stroke="#aeb7c8" strokeDasharray="3 3" />
+              {hoveredPoint.currentY !== null && <circle cx={hoveredPoint.x} cy={hoveredPoint.currentY} r="4" fill="#3478e5" stroke="#fff" strokeWidth="1.2" />}
+              {hoveredPoint.comparisonY !== null && <circle cx={hoveredPoint.x} cy={hoveredPoint.comparisonY} r="4" fill="#20a36a" stroke="#fff" strokeWidth="1.2" />}
             </g>
-          ))}
+          )}
+          <rect x={plot.left} y={plot.top} width={plotWidth} height={plotHeight} fill="transparent" style={{ cursor: "crosshair" }} />
           {labelIndices.map((index) => {
             const point = points[index];
             const labelDate = point.date ?? point.comparisonDate;
@@ -221,7 +234,7 @@ function DailySearchTrend({ points }: { points: SearchTrendPoint[] }) {
       </div>
     </div>
   );
-}
+});
 function itemKey(item: SearchTrendItem) {
   return [item.searchTerm, item.categoryName, item.searchTermType, item.boardType, item.dimension].join("|");
 }
@@ -242,17 +255,19 @@ export function SearchTrendsPage() {
   });
 
   useEffect(() => {
+    if (optionsQuery.isLoading || initialized) return;
     const latestDate = optionsQuery.data?.latestDate;
-    if (!latestDate || initialized) return;
-    const defaults = {
-      startDate: dayjs(latestDate).subtract(29, "day").format("YYYY-MM-DD"),
-      endDate: latestDate,
+    const defaults: SearchFilters = {
+      ...(latestDate ? {
+        startDate: dayjs(latestDate).subtract(29, "day").format("YYYY-MM-DD"),
+        endDate: latestDate,
+      } : {}),
       comparisonMode: "previousMonth" as const,
     };
     setDraft(defaults);
     setFilters(defaults);
     setInitialized(true);
-  }, [optionsQuery.data?.latestDate, initialized]);
+  }, [optionsQuery.data?.latestDate, optionsQuery.isLoading, initialized]);
 
   const trendsQuery = useQuery({
     queryKey: ["searchTrends", filters, page, pageSize, sort],
@@ -275,7 +290,8 @@ export function SearchTrendsPage() {
       if (filters.minGrowthRate !== undefined) params.minGrowthRate = filters.minGrowthRate;
       return (await api.get<SearchTrendResult>("/search-trends", { params })).data;
     },
-    enabled: !optionsQuery.isLoading,
+    // 等待筛选选项返回并写入默认日期后再查询，避免先发无日期请求、随后又发默认日期请求。
+    enabled: initialized,
   });
 
   useEffect(() => {

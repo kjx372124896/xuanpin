@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable } from "@nestjs/common";
+import { BadRequestException, Injectable, ServiceUnavailableException } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
 import { buildSearchTrendComparisonPeriods, calculateSearchTrendGrowthRate, shiftUtcMonthsClamped, type SearchTrendComparisonMode } from "./search-trends.helpers";
@@ -38,6 +38,18 @@ type SearchGroupRow = {
   currentDailyAverage: Prisma.Decimal | null;
   previousDaysWithData: number | null;
   currentDaysWithData: number | null;
+};
+
+type SearchGroupQueryRow = Omit<SearchGroupRow, "searchTerm"> & {
+  searchTerm: string | null;
+  total: bigint;
+};
+
+type SearchTrendOptionsResult = {
+  categories: string[];
+  searchTermTypes: string[];
+  boardTypes: string[];
+  latestDate: string | null;
 };
 
 function parseDate(value: string | undefined, label: string): Date | null {
@@ -90,27 +102,96 @@ function groupKey(value: { searchTerm: string; categoryName: string; searchTermT
 
 @Injectable()
 export class SearchTrendsService {
+  private readonly optionsCacheTtlMs = 5_000;
+  private optionsCache: { expiresAt: number; value: SearchTrendOptionsResult } | null = null;
+  private optionsInFlight: Promise<SearchTrendOptionsResult> | null = null;
+  private readonly maxConcurrentListQueries = 2;
+  private readonly maxQueuedListQueries = 40;
+  private readonly listQueryQueueTimeoutMs = 15_000;
+  private activeListQueries = 0;
+  private readonly listQueryWaiters: Array<() => void> = [];
+
   constructor(private readonly prisma: PrismaService) {}
 
+  private async withListQuerySlot<T>(operation: () => Promise<T>): Promise<T> {
+    let queuedAt: number | undefined;
+    if (this.activeListQueries >= this.maxConcurrentListQueries) {
+      if (this.listQueryWaiters.length >= this.maxQueuedListQueries) {
+        throw new ServiceUnavailableException("当前搜索趋势查询较多，请稍后重试。");
+      }
+      queuedAt = Date.now();
+      await new Promise<void>((resolve, reject) => {
+        const waiter = () => {
+          clearTimeout(timer);
+          resolve();
+        };
+        const timer = setTimeout(() => {
+          const index = this.listQueryWaiters.indexOf(waiter);
+          if (index >= 0) this.listQueryWaiters.splice(index, 1);
+          reject(new ServiceUnavailableException("搜索趋势查询排队时间过长，请稍后重试。"));
+        }, this.listQueryQueueTimeoutMs);
+        this.listQueryWaiters.push(waiter);
+      });
+    } else {
+      this.activeListQueries += 1;
+    }
+
+    const startedAt = Date.now();
+    try {
+      return await operation();
+    } finally {
+      const next = this.listQueryWaiters.shift();
+      if (next) next();
+      else this.activeListQueries -= 1;
+
+      const durationMs = Date.now() - startedAt;
+      const queueMs = queuedAt ? startedAt - queuedAt : 0;
+      if (durationMs >= 1_000 || queueMs >= 1_000) {
+        console.warn(`[performance] search-trends.list duration_ms=${durationMs} queue_ms=${queueMs}`);
+      }
+    }
+  }
+
   async options() {
-    const [categories, termTypes, boardTypes, latest] = await Promise.all([
-      this.prisma.searchTermHistory.findMany({ distinct: ["categoryName"], select: { categoryName: true }, orderBy: { categoryName: "asc" } }),
-      this.prisma.searchTermHistory.findMany({ distinct: ["searchTermType"], select: { searchTermType: true }, orderBy: { searchTermType: "asc" } }),
-      this.prisma.searchTermHistory.findMany({ distinct: ["boardType"], select: { boardType: true }, orderBy: { boardType: "asc" } }),
-      this.prisma.searchTermHistory.aggregate({ _max: { searchDate: true } }),
-    ]);
-    return {
-      categories: categories.map((item) => item.categoryName),
-      searchTermTypes: termTypes.map((item) => item.searchTermType),
-      boardTypes: boardTypes.map((item) => item.boardType),
-      latestDate: latest._max.searchDate ? dateKey(latest._max.searchDate) : null,
-    };
+    const now = Date.now();
+    if (this.optionsCache && this.optionsCache.expiresAt > now) return this.optionsCache.value;
+    if (this.optionsInFlight) return this.optionsInFlight;
+
+    const request = (async (): Promise<SearchTrendOptionsResult> => {
+      const [categories, termTypes, boardTypes, latest] = await Promise.all([
+        this.prisma.searchTermHistory.findMany({ distinct: ["categoryName"], select: { categoryName: true }, orderBy: { categoryName: "asc" } }),
+        this.prisma.searchTermHistory.findMany({ distinct: ["searchTermType"], select: { searchTermType: true }, orderBy: { searchTermType: "asc" } }),
+        this.prisma.searchTermHistory.findMany({ distinct: ["boardType"], select: { boardType: true }, orderBy: { boardType: "asc" } }),
+        this.prisma.searchTermHistory.aggregate({ _max: { searchDate: true } }),
+      ]);
+      const value = {
+        categories: categories.map((item) => item.categoryName),
+        searchTermTypes: termTypes.map((item) => item.searchTermType),
+        boardTypes: boardTypes.map((item) => item.boardType),
+        latestDate: latest._max.searchDate ? dateKey(latest._max.searchDate) : null,
+      };
+      this.optionsCache = { expiresAt: Date.now() + this.optionsCacheTtlMs, value };
+      return value;
+    })();
+    this.optionsInFlight = request;
+    try {
+      return await request;
+    } finally {
+      if (this.optionsInFlight === request) this.optionsInFlight = null;
+    }
   }
 
   async list(filters: SearchTrendFilters) {
-    const latestAggregate = await this.prisma.searchTermHistory.aggregate({ _max: { searchDate: true } });
-    const latestDate = latestAggregate._max.searchDate ?? new Date();
-    const defaultEnd = new Date(Date.UTC(latestDate.getUTCFullYear(), latestDate.getUTCMonth(), latestDate.getUTCDate()));
+    return this.withListQuerySlot(() => this.listInternal(filters));
+  }
+
+  private async listInternal(filters: SearchTrendFilters) {
+    // 前端通常会传入完整日期范围；只有缺少任一端点时才需要查询最新日期来补默认值。
+    const latestDate = !filters.startDate || !filters.endDate
+      ? (await this.prisma.searchTermHistory.aggregate({ _max: { searchDate: true } }))._max.searchDate ?? new Date()
+      : null;
+    const defaultEndSource = latestDate ?? new Date();
+    const defaultEnd = new Date(Date.UTC(defaultEndSource.getUTCFullYear(), defaultEndSource.getUTCMonth(), defaultEndSource.getUTCDate()));
     const defaultStart = new Date(defaultEnd);
     defaultStart.setUTCDate(defaultStart.getUTCDate() - 29);
 
@@ -212,7 +293,7 @@ export class SearchTrendsService {
                END AS "growthRate"
         FROM period_averages
       ),
-      selected AS (
+      selected AS MATERIALIZED (
         SELECT latest.*, counts."有数据天数",
                metrics."previousDailyAverage", metrics."currentDailyAverage",
                metrics."previousDaysWithData", metrics."currentDaysWithData",
@@ -224,36 +305,46 @@ export class SearchTrendsService {
       )
     `;
 
-    const totalResult = await this.prisma.$queryRaw<Array<{ total: bigint }>>(Prisma.sql`${cte} SELECT COUNT(*)::bigint AS total FROM selected`);
-    const total = Number(totalResult[0]?.total ?? 0n);
     const page = Math.max(1, Math.floor(Number(filters.page) || 1));
     const pageSize = Math.min(100, Math.max(10, Math.floor(Number(filters.pageSize) || 50)));
     const offset = (page - 1) * pageSize;
 
-    const groups = await this.prisma.$queryRaw<SearchGroupRow[]>(Prisma.sql`
+    // COUNT 与分页从同一份物化结果读取，避免分别执行两遍完整聚合 CTE。
+    const resultRows = await this.prisma.$queryRaw<SearchGroupQueryRow[]>(Prisma.sql`
       ${cte}
+      , totals AS (
+        SELECT COUNT(*)::bigint AS total FROM selected
+      ),
+      page_rows AS (
+        SELECT * FROM selected
+        ORDER BY ${orderBySql}
+        LIMIT ${pageSize} OFFSET ${offset}
+      )
       SELECT
-        "搜索词" AS "searchTerm",
-        "类目" AS "categoryName",
-        "分类名称" AS "classificationName",
-        "搜索词类型" AS "searchTermType",
-        "搜索榜单类型" AS "boardType",
-        "统计维度" AS "dimension",
-        "最新日期" AS "latestDate",
-        "排名" AS "latestRank",
-        "搜索人数原值" AS "latestSearchPeopleRaw",
-        "搜索人数下限" AS "latestSearchPeopleMin",
-        "搜索人数上限" AS "latestSearchPeopleMax",
-        "搜索人数中值" AS "latestSearchPeopleMedian",
-        "有数据天数" AS "daysWithData",
-        "previousDailyAverage",
-        "currentDailyAverage",
-        "previousDaysWithData",
-        "currentDaysWithData"
-      FROM selected
-      ORDER BY ${orderBySql}
-      LIMIT ${pageSize} OFFSET ${offset}
+        page_rows."搜索词" AS "searchTerm",
+        page_rows."类目" AS "categoryName",
+        page_rows."分类名称" AS "classificationName",
+        page_rows."搜索词类型" AS "searchTermType",
+        page_rows."搜索榜单类型" AS "boardType",
+        page_rows."统计维度" AS "dimension",
+        page_rows."最新日期" AS "latestDate",
+        page_rows."排名" AS "latestRank",
+        page_rows."搜索人数原值" AS "latestSearchPeopleRaw",
+        page_rows."搜索人数下限" AS "latestSearchPeopleMin",
+        page_rows."搜索人数上限" AS "latestSearchPeopleMax",
+        page_rows."搜索人数中值" AS "latestSearchPeopleMedian",
+        page_rows."有数据天数" AS "daysWithData",
+        page_rows."previousDailyAverage",
+        page_rows."currentDailyAverage",
+        page_rows."previousDaysWithData",
+        page_rows."currentDaysWithData",
+        totals.total
+      FROM totals
+      LEFT JOIN page_rows ON TRUE
     `);
+    const total = Number(resultRows[0]?.total ?? 0n);
+    // LEFT JOIN 保证越界页和零结果也能带回总数；占位行的搜索词为 NULL，应过滤掉。
+    const groups = resultRows.filter((row) => row.searchTerm !== null) as SearchGroupRow[];
 
     const comparison = {
       mode: comparisonMode,
