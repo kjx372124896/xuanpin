@@ -30,6 +30,7 @@ export class ProductsController {
       : Array.isArray(query.categoryLevel2) ? query.categoryLevel2.map(String).filter(Boolean) : undefined;
     return this.productsService.list({
       ...query,
+      cursor: typeof query.cursor === "string" ? query.cursor : undefined,
       latestWeekStarts,
       categoryLevel1,
       categoryLevel2,
@@ -65,6 +66,7 @@ export class ProductsController {
       : Array.isArray(query.categoryLevel2) ? query.categoryLevel2.map(String).filter(Boolean) : undefined;
     return this.productsService.teamFavorites({
       ...query,
+      cursor: typeof query.cursor === "string" ? query.cursor : undefined,
       latestWeekStarts,
       categoryLevel1,
       categoryLevel2,

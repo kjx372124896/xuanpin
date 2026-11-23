@@ -275,6 +275,8 @@ function provisionPostgres(values, envPath, databasePasswordProvided) {
   applicationUrl.pathname = `/${databaseName}`;
   applicationUrl.searchParams.set("schema", "public");
   applicationUrl.searchParams.set("sslmode", values.POSTGRES_SSLMODE);
+  applicationUrl.searchParams.set("connection_limit", values.POSTGRES_CONNECTION_LIMIT?.trim() || "5");
+  applicationUrl.searchParams.set("pool_timeout", values.POSTGRES_POOL_TIMEOUT?.trim() || "10");
   values.DATABASE_URL = applicationUrl.toString();
 
   replaceEnvValue(envPath, "POSTGRES_DB", databaseName);

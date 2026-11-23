@@ -82,4 +82,7 @@ export interface Paginated<T> {
   pageSize: number;
   total: number;
   totalPages: number;
+  hasPreviousPage?: boolean;
+  hasNextPage?: boolean;
+  nextCursor?: string | null;
 }

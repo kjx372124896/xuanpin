@@ -7,6 +7,7 @@ import { parseImportWorkbook, type ParsedImportRow } from "./import-parser";
 import { parseSearchImportWorkbook, type ParsedSearchImportRow } from "./search-import-parser";
 import { NO_SECOND_LEVEL_CATEGORY } from "./metric-parser";
 import { deduplicateProductImportRows, productImportBusinessKey } from "./product-import-dedup";
+import { calculateListingDate } from "../products/listing-date";
 
 type UploadedFile = Express.Multer.File;
 type RowWithFile = { row: ParsedImportRow; fileId: string; fileName: string };
@@ -555,9 +556,15 @@ export class ImportsService implements OnModuleInit {
       let updatedHistories = 0;
       const fileImportedCounts = new Map<string, number>();
       if (allRows.length) {
+        const listingDateByProduct = new Map(
+          [...metadataByProduct.values()].map((row) => [row.productId, calculateListingDate(row.productId)] as const),
+        );
         const products = [...metadataByProduct.values()].map((row) => ({
           productId: row.productId, productName: row.productName, productUrl: row.productUrl,
           shopName: row.shopName, shopType: row.shopType, imageUrl: row.imageUrl,
+          listingDate: listingDateByProduct.get(row.productId)
+            ? new Date(`${listingDateByProduct.get(row.productId)}T00:00:00.000Z`)
+            : null,
         }));
         for (let i = 0; i < products.length; i += 1000) {
           const result = await this.prisma.product.createMany({ data: products.slice(i, i + 1000), skipDuplicates: true });
@@ -567,15 +574,17 @@ export class ImportsService implements OnModuleInit {
         const metadataJson = JSON.stringify([...metadataByProduct.values()].map((row) => ({
           "商品ID": row.productId, "商品名称": row.productName, "商品链接": row.productUrl,
           "店铺名称": row.shopName, "店铺类型": row.shopType, "商品图片链接": row.imageUrl,
+          "上架日期": listingDateByProduct.get(row.productId),
           "周开始日期": dayKey(row.weekStart),
         })));
         await this.prisma.$executeRaw(Prisma.sql`
           UPDATE "商品主表" AS p
           SET "商品名称" = v."商品名称", "商品链接" = v."商品链接", "店铺名称" = v."店铺名称",
-              "店铺类型" = v."店铺类型", "商品图片链接" = v."商品图片链接", "更新时间" = now()
+              "店铺类型" = v."店铺类型", "商品图片链接" = v."商品图片链接",
+              "上架日期" = COALESCE(p."上架日期", v."上架日期"), "更新时间" = now()
           FROM jsonb_to_recordset(${metadataJson}::jsonb) AS v(
             "商品ID" text, "商品名称" text, "商品链接" text, "店铺名称" text,
-            "店铺类型" text, "商品图片链接" text, "周开始日期" date
+            "店铺类型" text, "商品图片链接" text, "上架日期" date, "周开始日期" date
           )
           WHERE p."商品ID" = v."商品ID"
             AND (p."最近上榜日期" IS NULL OR v."周开始日期" >= p."最近上榜日期")
@@ -635,6 +644,45 @@ export class ImportsService implements OnModuleInit {
           await Promise.all(chunk.map((item) => this.prisma.productHistory.update({ where: { id: item.id }, data: item.data })));
           updatedHistories += chunk.length;
         }
+
+        const affectedBoardTypes = [...new Set(allRows.map((item) => item.row.boardType))];
+        const affectedBoardTypesSql = Prisma.join(affectedBoardTypes.map((value) => Prisma.sql`${value}::"榜单类型"`));
+        await this.prisma.$transaction([
+          this.prisma.$executeRaw(Prisma.sql`
+            DELETE FROM "商品周期连续上榜统计表"
+            WHERE "商品ID" IN (${Prisma.join(productIds)})
+              AND "榜单类型" IN (${affectedBoardTypesSql})
+          `),
+          this.prisma.$executeRaw(Prisma.sql`
+            WITH distinct_weeks AS (
+              SELECT DISTINCT h."商品ID", h."榜单类型", h."周开始日期"
+              FROM "商品上榜历史表" h
+              WHERE h."商品ID" IN (${Prisma.join(productIds)})
+                AND h."榜单类型" IN (${affectedBoardTypesSql})
+            ),
+            islands AS (
+              SELECT
+                "商品ID", "榜单类型", "周开始日期",
+                "周开始日期" - (ROW_NUMBER() OVER (
+                  PARTITION BY "商品ID", "榜单类型" ORDER BY "周开始日期"
+                )::integer * 7) AS island_key
+              FROM distinct_weeks
+            ),
+            streaks AS (
+              SELECT
+                "商品ID", "榜单类型", "周开始日期",
+                ROW_NUMBER() OVER (
+                  PARTITION BY "商品ID", "榜单类型", island_key ORDER BY "周开始日期"
+                )::integer AS consecutive_week_count
+              FROM islands
+            )
+            INSERT INTO "商品周期连续上榜统计表" (
+              "商品ID", "榜单类型", "周开始日期", "连续上榜周数", "更新时间"
+            )
+            SELECT "商品ID", "榜单类型", "周开始日期", consecutive_week_count, now()
+            FROM streaks
+          `),
+        ]);
 
         const idsSql = Prisma.join(productIds);
         await this.prisma.$executeRaw(Prisma.sql`

@@ -71,6 +71,7 @@ model Product {
   shopName             String?             @map("店铺名称") @db.VarChar(255)
   shopType             String?             @map("店铺类型") @db.VarChar(80)
   imageUrl             String?             @map("商品图片链接") @db.Text
+  listingDate          DateTime?           @map("上架日期") @db.Date
   latestCategory       String?             @map("最新类目名称") @db.VarChar(255)
   latestCategoryLevel1 String?             @map("最新一级类目") @db.VarChar(255)
   latestCategoryLevel2 String?             @map("最新二级类目") @db.VarChar(255)
@@ -107,11 +108,13 @@ model Product {
   createdAt            DateTime            @default(now()) @map("创建时间")
   updatedAt            DateTime            @updatedAt @map("更新时间")
   histories            ProductHistory[]
+  periodStreaks        ProductPeriodStreak[]
   boardStats           ProductBoardStats[]
   favorites            ProductFavorite[]
 
   @@index([productName])
   @@index([shopName])
+  @@index([listingDate])
   @@index([latestCategory, latestWeekStart])
   @@index([latestCategoryLevel1, latestCategoryLevel2])
   @@index([aiMetricsFetchedAt])
@@ -157,6 +160,19 @@ model ProductHistory {
   @@index([categoryLevel1, categoryLevel2])
   @@index([weekStart, categoryName, rank])
   @@map("商品上榜历史表")
+}
+
+model ProductPeriodStreak {
+  productId            String    @map("商品ID") @db.VarChar(80)
+  boardType            BoardType @map("榜单类型")
+  weekStart            DateTime  @map("周开始日期") @db.Date
+  consecutiveWeekCount Int       @map("连续上榜周数")
+  updatedAt            DateTime  @default(now()) @updatedAt @map("更新时间")
+  product              Product   @relation(fields: [productId], references: [productId], onDelete: Cascade)
+
+  @@id([productId, boardType, weekStart], map: "商品周期连续上榜统计表_pkey")
+  @@index([boardType, weekStart, consecutiveWeekCount], map: "商品周期连续上榜_周期索引")
+  @@map("商品周期连续上榜统计表")
 }
 
 model ProductBoardStats {

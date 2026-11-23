@@ -1,6 +1,6 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Button, Card, Checkbox, DatePicker, Empty, Image, Input, InputNumber, Pagination, Segmented, Select, Space, Table, Tag, Tooltip, Typography, message } from "antd";
+import { Button, Card, Checkbox, DatePicker, Empty, Image, Input, InputNumber, Segmented, Select, Space, Table, Tag, Tooltip, Typography, message } from "antd";
 import { CloudDownloadOutlined, FilterOutlined, LinkOutlined, ReloadOutlined, SearchOutlined, StarFilled, StarOutlined } from "@ant-design/icons";
 import type { ColumnsType } from "antd/es/table";
 import dayjs from "dayjs";
@@ -174,6 +174,7 @@ export function ProductsPage() {
   const [filters, setFilters] = useState<Filters>({});
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(50);
+  const [cursorByPage, setCursorByPage] = useState<Record<number, string | null>>({ 1: null });
   const [selectedProductId, setSelectedProductId] = useState<string | null>(null);
   const [favoriteLoadingId, setFavoriteLoadingId] = useState<string | null>(null);
   const [selectedProductIds, setSelectedProductIds] = useState<string[]>([]);
@@ -186,15 +187,17 @@ export function ProductsPage() {
   const navigate = useNavigate();
   const { user } = useAuth();
   const isAdmin = user?.role === "ADMIN" || user?.role === "SUPER_ADMIN";
+  const cursor = page > 1 ? cursorByPage[page] ?? undefined : undefined;
   const params = useMemo(() => ({
     page,
     pageSize,
+    cursor,
     boardType,
     ...filters,
     categoryLevel1: filters.categoryLevel1?.join(",") || undefined,
     categoryLevel2: filters.categoryLevel2?.join(",") || undefined,
     latestWeekStarts: filters.latestWeekStarts?.join(",") || undefined,
-  }), [page, pageSize, boardType, filters]);
+  }), [page, pageSize, cursor, boardType, filters]);
   const productsQuery = useQuery({
     queryKey: ["products", "board-v1", boardType, params],
     queryFn: async () => (await api.get<Paginated<ProductListItem>>("/products", { params })).data,
@@ -336,15 +339,25 @@ export function ProductsPage() {
     isAdmin ? 48 : 0,
   );
 
-  function applyFilters() { setPage(1); setFilters({ ...draft }); }
-  function resetFilters() { setDraft({}); setFilters({}); setPage(1); }
+  function resetPagination() {
+    setPage(1);
+    setCursorByPage({ 1: null });
+  }
+  function goToNextPage() {
+    if (!data?.nextCursor || !data.hasNextPage) return;
+    const nextPage = page + 1;
+    setCursorByPage((current) => ({ ...current, [nextPage]: data.nextCursor ?? null }));
+    setPage(nextPage);
+  }
+  function applyFilters() { resetPagination(); setFilters({ ...draft }); }
+  function resetFilters() { setDraft({}); setFilters({}); resetPagination(); }
   async function toggleFavorite(item: ProductListItem) {
     setFavoriteLoadingId(item.productId);
     try {
       const path = `/products/${encodeURIComponent(item.productId)}/favorite`;
       if (item.isFavorited) await api.delete(path);
       else await api.post(path);
-      if (filters.favoritesOnly) setPage(1);
+      if (filters.favoritesOnly || teamFavoritesMode) resetPagination();
       await queryClient.invalidateQueries({ queryKey: ["products"] });
       await queryClient.invalidateQueries({ queryKey: ["team-favorites"] });
     } catch {
@@ -460,7 +473,7 @@ export function ProductsPage() {
           {isAdmin && teamFavoritesMode ? (
             <div className="filter-field filter-field-favorites filter-field-second-row">
               <label htmlFor="filter-member-keyword">收藏成员</label>
-              <Input id="filter-member-keyword" allowClear value={memberKeyword} onChange={(event) => { setMemberKeyword(event.target.value); setPage(1); }} placeholder="姓名 / 账号 / 部门" />
+              <Input id="filter-member-keyword" allowClear value={memberKeyword} onChange={(event) => { setMemberKeyword(event.target.value); resetPagination(); }} placeholder="姓名 / 账号 / 部门" />
             </div>
           ) : (
             <div className="filter-field filter-field-favorites filter-field-second-row">
@@ -493,7 +506,7 @@ export function ProductsPage() {
                 setBoardType(value as BoardType);
                 setDraft({});
                 setFilters({});
-                setPage(1);
+                resetPagination();
                 setSelectedProductIds([]);
                 setSelectedProductId(null);
               }}
@@ -504,7 +517,7 @@ export function ProductsPage() {
               <Segmented
                 value={teamFavoritesMode ? "team" : "all"}
                 options={[{ label: "全部商品", value: "all" }, { label: "成员收藏", value: "team" }]}
-                onChange={(value) => { setTeamFavoritesMode(value === "team"); setSelectedProductIds([]); setPage(1); }}
+                onChange={(value) => { setTeamFavoritesMode(value === "team"); setSelectedProductIds([]); resetPagination(); }}
               />
               <Button type="primary" icon={<CloudDownloadOutlined />} disabled={!selectedProductIds.length || creatingTask} loading={creatingTask} onClick={() => void startAiMetrics()}>获取更多数据</Button>
               <div className="bulk-ai-meta">
@@ -515,19 +528,18 @@ export function ProductsPage() {
             </div>
           )}
           <div className="table-heading-actions">
-            <Pagination
-              size="small"
-              current={page}
-              pageSize={pageSize}
-              total={data?.total ?? 0}
-              showSizeChanger
-              showLessItems
-              pageSizeOptions={[50, 100]}
-              onChange={(nextPage, nextSize) => {
-                setPage(nextPage);
-                setPageSize(nextSize);
-              }}
-            />
+            <Space size={8}>
+              <Button size="small" disabled={page <= 1 || activeQuery.isFetching} onClick={() => setPage((current) => Math.max(1, current - 1))}>上一页</Button>
+              <Typography.Text type="secondary">第 {page} / {Math.max(1, data?.totalPages ?? 0)} 页</Typography.Text>
+              <Button size="small" disabled={!data?.hasNextPage || !data.nextCursor || activeQuery.isFetching} onClick={goToNextPage}>下一页</Button>
+              <Select
+                size="small"
+                value={pageSize}
+                options={[{ label: "50 条/页", value: 50 }, { label: "100 条/页", value: 100 }]}
+                onChange={(nextSize) => { setPageSize(nextSize); resetPagination(); }}
+                style={{ width: 104 }}
+              />
+            </Space>
             <Tag color="blue">共 {data?.total ?? 0} 条</Tag>
           </div>
         </div>
