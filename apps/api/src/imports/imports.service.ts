@@ -1,11 +1,12 @@
 import { Injectable, NotFoundException, OnModuleInit, BadRequestException } from "@nestjs/common";
 import { Prisma, ImportBatchStatus, ImportFileStatus, ImportKind } from "@prisma/client";
 import { createHash } from "node:crypto";
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { PrismaService } from "../prisma/prisma.service";
 import { parseImportWorkbook, type ParsedImportRow } from "./import-parser";
 import { parseSearchImportWorkbook, type ParsedSearchImportRow } from "./search-import-parser";
 import { NO_SECOND_LEVEL_CATEGORY } from "./metric-parser";
+import { deduplicateProductImportRows, productImportBusinessKey } from "./product-import-dedup";
 
 type UploadedFile = Express.Multer.File;
 type RowWithFile = { row: ParsedImportRow; fileId: string; fileName: string };
@@ -20,9 +21,6 @@ function categoryRegistryName(level1: string, level2: string) {
   const digest = createHash("md5").update(level1).digest("hex").slice(0, 8);
   const marker = `~${digest}${suffix}`;
   return `${Array.from(level1).slice(0, 255 - Array.from(marker).length).join("")}${marker}`;
-}
-function businessKey(row: Pick<ParsedImportRow, "boardType" | "productId" | "weekStart" | "categoryName">) {
-  return `${row.boardType}|${row.productId}|${dayKey(row.weekStart)}|${row.categoryName}`;
 }
 function historyData(item: RowWithFile): Prisma.ProductHistoryCreateManyInput {
   const { row, fileId, fileName } = item;
@@ -65,6 +63,31 @@ function searchHistoryData(item: SearchRowWithFile): Prisma.SearchTermHistoryCre
     sourceFileName: fileName,
     sourceRowNumber: row.sourceRowNumber,
   };
+}
+
+function parseProductImportFileMeta(value: string | null) {
+  try {
+    const parsed = JSON.parse(value ?? "null");
+    return {
+      errors: Array.isArray(parsed) ? parsed : Array.isArray(parsed?.errors) ? parsed.errors : [],
+      duplicateRows: Array.isArray(parsed) ? 0 : Number.isInteger(parsed?.duplicateRows) ? Math.max(0, parsed.duplicateRows) : 0,
+    };
+  } catch {
+    return { errors: [], duplicateRows: 0 };
+  }
+}
+
+async function readProductPreviewRows(storagePath: string): Promise<ParsedImportRow[]> {
+  const artifact = JSON.parse(await readFile(storagePath, "utf8")) as { version?: number; rows?: Array<Record<string, unknown>> };
+  if (artifact.version !== 1 || !Array.isArray(artifact.rows)) {
+    throw new Error("商品榜单预览归并文件格式无效，请重新上传并预览。");
+  }
+  return artifact.rows.map((row) => ({
+    ...row,
+    weekStart: new Date(String(row.weekStart)),
+    weekEnd: new Date(String(row.weekEnd)),
+    exportTime: row.exportTime ? new Date(String(row.exportTime)) : null,
+  })) as unknown as ParsedImportRow[];
 }
 
 @Injectable()
@@ -184,8 +207,18 @@ export class ImportsService implements OnModuleInit {
   private async createProductPreview(files: UploadedFile[], operatorId: string) {
     const batch = await this.prisma.importBatch.create({ data: { operatorId, totalFiles: files.length } });
     const seenHashes = new Set<string>();
-    const previewRows: Array<Record<string, unknown>> = [];
+    const fileItems: Array<{
+      id: string;
+      originalName: string;
+      originalPath: string;
+      status: ImportFileStatus;
+      parsed: Awaited<ReturnType<typeof parseImportWorkbook>> | null;
+      parseError: string | null;
+      rowCount: number;
+      rowErrors: Array<{ row: number; productId?: string; message: string }>;
+    }> = [];
     const fileSummaries: Array<Record<string, unknown>> = [];
+    const candidates: RowWithFile[] = [];
     let totalRows = 0;
     let errorRows = 0;
 
@@ -216,28 +249,60 @@ export class ImportsService implements OnModuleInit {
         },
       });
       if (parsed && !previous) {
-        for (const row of parsed.rows.slice(0, Math.max(0, 20 - previewRows.length))) {
-          previewRows.push({
-            productId: row.productId, productName: row.productName, categoryName: row.categoryName,
-            categoryLevel1: row.categoryLevel1, categoryLevel2: row.categoryLevel2,
-            weekStart: dayKey(row.weekStart), weekEnd: dayKey(row.weekEnd), rank: row.rank, visitor: row.visitor, buyer: row.buyer,
-          });
-        }
+        for (const row of parsed.rows) candidates.push({ row, fileId: record.id, fileName: file.originalname });
       }
-      fileSummaries.push({
-        id: record.id, originalName: record.originalName, status, sheetName: record.sheetName,
-        boardType: parsed?.boardType ?? null,
-        weekStart: record.weekStart ? dayKey(record.weekStart) : null,
-        weekEnd: record.weekEnd ? dayKey(record.weekEnd) : null,
-        categoryName: record.categoryName, rowCount, validRows: previous ? 0 : parsed?.rows.length ?? 0,
-        errorCount: rowErrors.length, parseError, errors: rowErrors.slice(0, 20),
+      fileItems.push({
+        id: record.id, originalName: file.originalname, originalPath: file.path, status,
+        parsed, parseError, rowCount, rowErrors,
       });
     }
 
-    await this.prisma.importBatch.update({ where: { id: batch.id }, data: { totalRows, errorRows } });
+    const deduplicated = deduplicateProductImportRows(candidates);
+    const rowsByFile = new Map<string, ParsedImportRow[]>();
+    for (const item of deduplicated.rows) {
+      const rows = rowsByFile.get(item.fileId) ?? [];
+      rows.push(item.row);
+      rowsByFile.set(item.fileId, rows);
+    }
+
+    for (const item of fileItems) {
+      const duplicateRows = deduplicated.duplicateCountsByFile.get(item.id) ?? 0;
+      const retainedRows = item.status === "PREVIEW" ? rowsByFile.get(item.id) ?? [] : [];
+      if (item.status === "PREVIEW") {
+        const previewPath = `${item.originalPath}.preview.json`;
+        await writeFile(previewPath, JSON.stringify({ version: 1, rows: retainedRows }), "utf8");
+        await this.prisma.importFile.update({
+          where: { id: item.id },
+          data: {
+            storagePath: previewPath,
+            errorsJson: JSON.stringify({ parseError: item.parseError, errors: item.rowErrors.slice(0, 200), duplicateRows }),
+          },
+        });
+      }
+      fileSummaries.push({
+        id: item.id, originalName: item.originalName, status: item.status, sheetName: item.parsed?.sheetName ?? null,
+        boardType: item.parsed?.boardType ?? null,
+        weekStart: item.parsed?.weekStart ? dayKey(item.parsed.weekStart) : null,
+        weekEnd: item.parsed?.weekEnd ? dayKey(item.parsed.weekEnd) : null,
+        categoryName: item.parsed?.categoryName ?? null, rowCount: item.rowCount, validRows: retainedRows.length,
+        duplicateRows, errorCount: item.rowErrors.length, parseError: item.parseError, errors: item.rowErrors.slice(0, 20),
+      });
+    }
+
+    const previewRows = deduplicated.rows.slice(0, 20).map(({ row }) => ({
+      boardType: row.boardType,
+      productId: row.productId, productName: row.productName, categoryName: row.categoryName,
+      categoryLevel1: row.categoryLevel1, categoryLevel2: row.categoryLevel2,
+      weekStart: dayKey(row.weekStart), weekEnd: dayKey(row.weekEnd), rank: row.rank, visitor: row.visitor, buyer: row.buyer,
+    }));
+    await this.prisma.importBatch.update({
+      where: { id: batch.id },
+      data: { totalRows, errorRows, duplicateRows: deduplicated.duplicateRows },
+    });
     return {
       batchId: batch.id, status: "PREVIEW", totalFiles: files.length, totalRows,
       validRows: fileSummaries.reduce((sum, item) => sum + (item.status === "PREVIEW" ? Number(item.validRows ?? 0) : 0), 0),
+      duplicateRows: deduplicated.duplicateRows,
       errorRows, duplicateFiles: fileSummaries.filter((item) => item.status === "DUPLICATE").length,
       files: fileSummaries, previewRows,
     };
@@ -427,9 +492,11 @@ export class ImportsService implements OnModuleInit {
       }
       await this.prisma.importBatch.update({ where: { id: batchId }, data: { status: "PROCESSING", startedAt: new Date() } });
 
-      const allRows: RowWithFile[] = [];
+      let allRows: RowWithFile[] = [];
       const fileErrors = new Map<string, Array<{ row: number; productId?: string; message: string }>>();
       const fileValidCounts = new Map<string, number>();
+      const fileErrorCounts = new Map<string, number>();
+      const fileDuplicateCounts = new Map<string, number>();
       let errorRows = 0;
       let duplicateRows = 0;
 
@@ -437,12 +504,41 @@ export class ImportsService implements OnModuleInit {
         if (file.status === "DUPLICATE") { duplicateRows += file.rowCount; continue; }
         if (file.status !== "PREVIEW") continue;
         await this.prisma.importFile.update({ where: { id: file.id }, data: { status: "PROCESSING" } });
-        const parsed = await parseImportWorkbook(file.storagePath);
-        fileErrors.set(file.id, parsed.errors);
-        errorRows += parsed.errors.length;
-        fileValidCounts.set(file.id, parsed.rows.length);
-        for (const row of parsed.rows) allRows.push({ row, fileId: file.id, fileName: file.originalName });
+        let rows: ParsedImportRow[];
+        let errors: Array<{ row: number; productId?: string; message: string }>;
+        let storedDuplicateRows = 0;
+        let fileErrorCount = 0;
+        if (file.storagePath.endsWith(".preview.json")) {
+          rows = await readProductPreviewRows(file.storagePath);
+          const meta = parseProductImportFileMeta(file.errorsJson);
+          errors = meta.errors;
+          storedDuplicateRows = meta.duplicateRows;
+          fileErrorCount = file.errorCount;
+        } else {
+          // Backward compatibility for batches previewed before pre-deduplication was introduced.
+          const parsed = await parseImportWorkbook(file.storagePath);
+          rows = parsed.rows;
+          errors = parsed.errors;
+          fileErrorCount = parsed.errors.length;
+        }
+        fileErrors.set(file.id, errors);
+        fileErrorCounts.set(file.id, fileErrorCount);
+        fileDuplicateCounts.set(file.id, storedDuplicateRows);
+        errorRows += fileErrorCount;
+        duplicateRows += storedDuplicateRows;
+        for (const row of rows) allRows.push({ row, fileId: file.id, fileName: file.originalName });
       }
+
+      // Sidecar rows are already deduplicated in preview. This second pass only
+      // affects legacy queued batches that still point to their original XLSX files.
+      const batchDeduplication = deduplicateProductImportRows(allRows);
+      allRows = batchDeduplication.rows;
+      duplicateRows += batchDeduplication.duplicateRows;
+      for (const [fileId, count] of batchDeduplication.duplicateCountsByFile) {
+        fileDuplicateCounts.set(fileId, (fileDuplicateCounts.get(fileId) ?? 0) + count);
+      }
+      fileValidCounts.clear();
+      for (const item of allRows) fileValidCounts.set(item.fileId, (fileValidCounts.get(item.fileId) ?? 0) + 1);
 
       const productIds = [...new Set(allRows.map((item) => item.row.productId))];
       const metadataByProduct = new Map<string, ParsedImportRow>();
@@ -519,7 +615,7 @@ export class ImportsService implements OnModuleInit {
         const toCreate: Prisma.ProductHistoryCreateManyInput[] = [];
         const toUpdate: Array<{ id: string; data: Prisma.ProductHistoryUpdateInput }> = [];
         for (const item of allRows) {
-          const previous = existingMap.get(businessKey(item.row));
+          const previous = existingMap.get(productImportBusinessKey(item.row));
           const data = historyData(item);
           if (!previous) {
             toCreate.push(data);
@@ -548,7 +644,9 @@ export class ImportsService implements OnModuleInit {
               h."访客数原值", h."访客数下限", h."访客数上限", h."访客数中值",
               h."支付买家数原值", h."支付买家数下限", h."支付买家数上限", h."支付买家数中值"
             FROM "商品上榜历史表" h WHERE h."商品ID" IN (${idsSql})
-            ORDER BY h."商品ID", h."榜单类型", h."周开始日期" DESC, h."导出时间" DESC NULLS LAST, h."导入时间" DESC, h."类目名称" ASC
+            ORDER BY h."商品ID", h."榜单类型", h."周开始日期" DESC,
+              CASE WHEN h."二级类目" = '无二级类目' THEN 1 ELSE 0 END ASC,
+              h."导出时间" DESC NULLS LAST, h."导入时间" DESC, h."类目名称" ASC
           ),
           counts AS (
             SELECT h."商品ID", h."榜单类型", MIN(h."周开始日期") AS first_week, COUNT(*)::int AS record_count,
@@ -610,11 +708,12 @@ export class ImportsService implements OnModuleInit {
         if (file.status === "DUPLICATE") continue;
         const errors = fileErrors.get(file.id) ?? [];
         const validCount = fileValidCounts.get(file.id) ?? 0;
+        const duplicateCount = fileDuplicateCounts.get(file.id) ?? 0;
         await this.prisma.importFile.update({ where: { id: file.id }, data: {
-          status: validCount ? "COMPLETED" : "FAILED",
+          status: validCount || duplicateCount ? "COMPLETED" : "FAILED",
           importedCount: fileImportedCounts.get(file.id) ?? 0,
-          errorCount: errors.length,
-          errorsJson: JSON.stringify(errors.slice(0, 200)),
+          errorCount: fileErrorCounts.get(file.id) ?? errors.length,
+          errorsJson: JSON.stringify({ parseError: null, errors: errors.slice(0, 200), duplicateRows: duplicateCount }),
         } });
       }
 

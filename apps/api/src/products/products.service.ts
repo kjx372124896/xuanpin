@@ -61,10 +61,53 @@ function mapProduct(stats: any, product: any = stats) {
   };
 }
 
+const NO_SECOND_LEVEL_CATEGORY = "无二级类目";
+
+function compareHistoryRowsForDisplay<T extends {
+  productId: string;
+  weekStart: Date;
+  categoryLevel2: string;
+  exportTime: Date | null;
+  importedAt: Date;
+  categoryName: string;
+}>(a: T, b: T) {
+  return a.productId.localeCompare(b.productId)
+    || a.weekStart.getTime() - b.weekStart.getTime()
+    || Number(a.categoryLevel2 === NO_SECOND_LEVEL_CATEGORY) - Number(b.categoryLevel2 === NO_SECOND_LEVEL_CATEGORY)
+    || (b.exportTime?.getTime() ?? 0) - (a.exportTime?.getTime() ?? 0)
+    || b.importedAt.getTime() - a.importedAt.getTime()
+    || a.categoryName.localeCompare(b.categoryName);
+}
+
 @Injectable()
 export class ProductsService {
   constructor(private readonly prisma: PrismaService) {}
 
+  private async findProductIdsByPreferredCategoryLevel2(
+    boardType: "NEW_PRODUCT_TRAFFIC" | "TRANSACTION_GROWTH",
+    categoryLevel2: string[],
+  ) {
+    const rows = await this.prisma.$queryRaw<Array<{ productId: string }>>(Prisma.sql`
+      SELECT s."商品ID" AS "productId"
+      FROM "商品榜单统计表" s
+      JOIN LATERAL (
+        SELECT h."二级类目"
+        FROM "商品上榜历史表" h
+        WHERE h."商品ID" = s."商品ID"
+          AND h."榜单类型" = s."榜单类型"
+          AND h."周开始日期" = s."最近上榜日期"
+        ORDER BY
+          CASE WHEN h."二级类目" = '无二级类目' THEN 1 ELSE 0 END ASC,
+          h."导出时间" DESC NULLS LAST,
+          h."导入时间" DESC,
+          h."类目名称" ASC
+        LIMIT 1
+      ) preferred ON TRUE
+      WHERE s."榜单类型" = ${boardType}
+        AND preferred."二级类目" IN (${Prisma.join(categoryLevel2)})
+    `);
+    return rows.map((row) => row.productId);
+  }
   /**
    * 以筛选器选中的上榜周期为终点，按每个商品的历史周记录向前回溯。
    * 同一商品在一个周期命中多个类目时，只按一个上榜周计算。
@@ -193,7 +236,9 @@ export class ProductsService {
       product: { AND: productConditions },
     };
     if (query.categoryLevel1?.length) where.latestCategoryLevel1 = { in: query.categoryLevel1 };
-    if (query.categoryLevel2?.length) where.latestCategoryLevel2 = { in: query.categoryLevel2 };
+    if (query.categoryLevel2?.length) {
+      where.productId = { in: await this.findProductIdsByPreferredCategoryLevel2(boardType, query.categoryLevel2) };
+    }
 
     const selectedPeriods = normalizePeriodStarts(query.latestWeekStarts);
     const hasConsecutiveWeekRange = query.consecutiveWeekCountMin !== undefined || query.consecutiveWeekCountMax !== undefined;
@@ -269,7 +314,7 @@ export class ProductsService {
       productIds.length
         ? this.prisma.productHistory.findMany({
           where: { productId: { in: productIds }, boardType },
-          select: { productId: true, weekStart: true, weekEnd: true, buyerRaw: true, buyerMin: true, buyerMax: true, buyerMedian: true, exportTime: true, categoryName: true },
+          select: { productId: true, weekStart: true, weekEnd: true, buyerRaw: true, buyerMin: true, buyerMax: true, buyerMedian: true, exportTime: true, importedAt: true, categoryName: true, categoryLevel1: true, categoryLevel2: true },
         })
         : [],
       productIds.length
@@ -280,16 +325,15 @@ export class ProductsService {
         : [],
     ]);
     const favoriteIds = new Set(favoriteRows.map((row) => row.productId));
-    historyRows.sort((a, b) => a.productId.localeCompare(b.productId)
-      || a.weekStart.getTime() - b.weekStart.getTime()
-      || (b.exportTime?.getTime() ?? 0) - (a.exportTime?.getTime() ?? 0)
-      || a.categoryName.localeCompare(b.categoryName));
+    historyRows.sort(compareHistoryRowsForDisplay);
     const trendByProduct = new Map<string, Array<{ weekStart: string; weekEnd: string; raw: string | null; min: number | null; max: number | null; median: number | null }>>();
     const seenProductWeeks = new Set<string>();
+    const preferredHistoryByProductWeek = new Map<string, (typeof historyRows)[number]>();
     for (const row of historyRows) {
       const weekKey = row.productId + "|" + row.weekStart.toISOString().slice(0, 10);
       if (seenProductWeeks.has(weekKey)) continue;
       seenProductWeeks.add(weekKey);
+      preferredHistoryByProductWeek.set(weekKey, row);
       const trend = trendByProduct.get(row.productId) ?? [];
       trend.push({
         weekStart: row.weekStart.toISOString(),
@@ -303,11 +347,22 @@ export class ProductsService {
     }
 
     return {
-      items: items.map((item) => ({
-        ...mapProduct(item, item.product),
-        isFavorited: favoriteIds.has(item.productId),
-        buyerTrend: (trendByProduct.get(item.productId) ?? []).slice(-12),
-      })),
+      items: items.map((item) => {
+        const latestWeekKey = item.latestWeekStart
+          ? item.productId + "|" + item.latestWeekStart.toISOString().slice(0, 10)
+          : "";
+        const preferredLatestHistory = preferredHistoryByProductWeek.get(latestWeekKey);
+        return {
+          ...mapProduct(item, item.product),
+          ...(preferredLatestHistory ? {
+            latestCategory: preferredLatestHistory.categoryName,
+            latestCategoryLevel1: preferredLatestHistory.categoryLevel1,
+            latestCategoryLevel2: preferredLatestHistory.categoryLevel2,
+          } : {}),
+          isFavorited: favoriteIds.has(item.productId),
+          buyerTrend: (trendByProduct.get(item.productId) ?? []).slice(-12),
+        };
+      }),
       page,
       pageSize,
       total,
@@ -683,7 +738,9 @@ export class ProductsService {
       product: { AND: productConditions },
     };
     if (query.categoryLevel1?.length) where.latestCategoryLevel1 = { in: query.categoryLevel1 };
-    if (query.categoryLevel2?.length) where.latestCategoryLevel2 = { in: query.categoryLevel2 };
+    if (query.categoryLevel2?.length) {
+      where.productId = { in: await this.findProductIdsByPreferredCategoryLevel2(boardType, query.categoryLevel2) };
+    }
     const selectedPeriods = normalizePeriodStarts(query.latestWeekStarts);
     const hasConsecutiveWeekRange = query.consecutiveWeekCountMin !== undefined || query.consecutiveWeekCountMax !== undefined;
     if (query.latestWeekStarts?.length) {
@@ -752,23 +809,22 @@ export class ProductsService {
     const [historyRows, adminFavorites] = await Promise.all([
       productIds.length ? this.prisma.productHistory.findMany({
         where: { productId: { in: productIds }, boardType },
-        select: { productId: true, weekStart: true, weekEnd: true, buyerRaw: true, buyerMin: true, buyerMax: true, buyerMedian: true, exportTime: true, categoryName: true },
+        select: { productId: true, weekStart: true, weekEnd: true, buyerRaw: true, buyerMin: true, buyerMax: true, buyerMedian: true, exportTime: true, importedAt: true, categoryName: true, categoryLevel1: true, categoryLevel2: true },
       }) : [],
       productIds.length ? this.prisma.productFavorite.findMany({
         where: { userId: query.adminUserId, productId: { in: productIds } },
         select: { productId: true },
       }) : [],
     ]);
-    historyRows.sort((a, b) => a.productId.localeCompare(b.productId)
-      || a.weekStart.getTime() - b.weekStart.getTime()
-      || (b.exportTime?.getTime() ?? 0) - (a.exportTime?.getTime() ?? 0)
-      || a.categoryName.localeCompare(b.categoryName));
+    historyRows.sort(compareHistoryRowsForDisplay);
     const trendByProduct = new Map<string, Array<{ weekStart: string; weekEnd: string; raw: string | null; min: number | null; max: number | null; median: number | null }>>();
     const seenProductWeeks = new Set<string>();
+    const preferredHistoryByProductWeek = new Map<string, (typeof historyRows)[number]>();
     for (const row of historyRows) {
       const weekKey = row.productId + "|" + row.weekStart.toISOString().slice(0, 10);
       if (seenProductWeeks.has(weekKey)) continue;
       seenProductWeeks.add(weekKey);
+      preferredHistoryByProductWeek.set(weekKey, row);
       const trend = trendByProduct.get(row.productId) ?? [];
       trend.push({
         weekStart: row.weekStart.toISOString(),
@@ -782,19 +838,30 @@ export class ProductsService {
     }
     const adminFavoriteIds = new Set(adminFavorites.map((row) => row.productId));
     return {
-      items: items.map((item) => ({
-        ...mapProduct(item, item.product),
-        isFavorited: adminFavoriteIds.has(item.productId),
-        buyerTrend: (trendByProduct.get(item.productId) ?? []).slice(-12),
-        favoriteCount: item.product.favorites.length,
-        favoriteUsers: item.product.favorites.map((favorite) => ({
-          userId: favorite.user.id,
-          name: favorite.user.name,
-          username: favorite.user.username,
-          department: favorite.user.department,
-          favoritedAt: favorite.createdAt.toISOString(),
-        })),
-      })),
+      items: items.map((item) => {
+        const latestWeekKey = item.latestWeekStart
+          ? item.productId + "|" + item.latestWeekStart.toISOString().slice(0, 10)
+          : "";
+        const preferredLatestHistory = preferredHistoryByProductWeek.get(latestWeekKey);
+        return {
+          ...mapProduct(item, item.product),
+          ...(preferredLatestHistory ? {
+            latestCategory: preferredLatestHistory.categoryName,
+            latestCategoryLevel1: preferredLatestHistory.categoryLevel1,
+            latestCategoryLevel2: preferredLatestHistory.categoryLevel2,
+          } : {}),
+          isFavorited: adminFavoriteIds.has(item.productId),
+          buyerTrend: (trendByProduct.get(item.productId) ?? []).slice(-12),
+          favoriteCount: item.product.favorites.length,
+          favoriteUsers: item.product.favorites.map((favorite) => ({
+            userId: favorite.user.id,
+            name: favorite.user.name,
+            username: favorite.user.username,
+            department: favorite.user.department,
+            favoritedAt: favorite.createdAt.toISOString(),
+          })),
+        };
+      }),
       page,
       pageSize,
       total,

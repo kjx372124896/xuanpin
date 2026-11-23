@@ -11,11 +11,11 @@ interface PreviewFile {
   id: string; originalName: string; status: string; sheetName: string | null;
   boardType: "NEW_PRODUCT_TRAFFIC" | "TRANSACTION_GROWTH" | null;
   weekStart: string | null; weekEnd: string | null; categoryName: string | null;
-  rowCount: number; validRows: number; errorCount: number; parseError: string | null;
+  rowCount: number; validRows: number; duplicateRows: number; errorCount: number; parseError: string | null;
   errors?: Array<{ row: number; productId?: string; message: string }>;
 }
-interface PreviewRow { productId: string; productName: string; categoryName: string; categoryLevel1: string; categoryLevel2: string; weekStart: string; weekEnd: string; rank: number | null; visitor: { raw: string | null; min: number | null; max: number | null; median: number | null }; buyer: { raw: string | null; min: number | null; max: number | null; median: number | null } }
-interface PreviewResult { batchId: string; status: string; totalFiles: number; totalRows: number; validRows: number; errorRows: number; duplicateFiles: number; files: PreviewFile[]; previewRows: PreviewRow[] }
+interface PreviewRow { boardType: "NEW_PRODUCT_TRAFFIC" | "TRANSACTION_GROWTH"; productId: string; productName: string; categoryName: string; categoryLevel1: string; categoryLevel2: string; weekStart: string; weekEnd: string; rank: number | null; visitor: { raw: string | null; min: number | null; max: number | null; median: number | null }; buyer: { raw: string | null; min: number | null; max: number | null; median: number | null } }
+interface PreviewResult { batchId: string; status: string; totalFiles: number; totalRows: number; validRows: number; duplicateRows: number; errorRows: number; duplicateFiles: number; files: PreviewFile[]; previewRows: PreviewRow[] }
 interface ImportBatch { id: string; status: string; totalFiles: number; totalRows: number; importedRows: number; duplicateRows: number; errorRows: number; newProducts: number; createdHistories: number; updatedHistories: number; createdAt: string; completedAt: string | null; files: Array<{ id: string; originalName: string; boardType: "NEW_PRODUCT_TRAFFIC" | "TRANSACTION_GROWTH" | null; status: string; rowCount: number; importedCount: number; errorCount: number; errorsJson?: string | null }> }
 
 const statusMap: Record<string, { label: string; color: string }> = {
@@ -27,6 +27,12 @@ const statusMap: Record<string, { label: string; color: string }> = {
 function StatusTag({ status }: { status: string }) { const item = statusMap[status] ?? { label: status, color: "default" }; return <Tag color={item.color}>{item.label}</Tag>; }
 function boardTypeLabel(value: string | null | undefined) {
   return value === "TRANSACTION_GROWTH" ? "交易增速" : value === "NEW_PRODUCT_TRAFFIC" ? "新品流量" : "未识别";
+}
+function fileDuplicateCount(value: string | null | undefined) {
+  try {
+    const parsed = value ? JSON.parse(value) : null;
+    return Number.isInteger(parsed?.duplicateRows) ? parsed.duplicateRows : 0;
+  } catch { return 0; }
 }
 function previewMetric(metric: PreviewRow["buyer"]) {
   const format = (value: number | null) => value === null ? "—" : value.toLocaleString("zh-CN", { maximumFractionDigits: 1 });
@@ -66,7 +72,7 @@ function ProductImportPanel() {
     try {
       const result = (await api.post<PreviewResult>("/imports/preview", formData)).data;
       setPreview(result); setBatchId(result.batchId);
-      message.success(`解析完成：${result.validRows.toLocaleString()} 行有效数据`);
+      message.success(`解析完成：${result.validRows.toLocaleString()} 行去重后有效数据`);
     } catch (error) { message.error(errorMessage(error)); }
     finally { setUploading(false); }
   }
@@ -88,7 +94,8 @@ function ProductImportPanel() {
   const batchErrors = (currentBatch?.files ?? []).flatMap((file) => {
     try {
       const parsed = file.errorsJson ? JSON.parse(file.errorsJson) : null;
-      return (parsed?.errors ?? []).map((error: { row: number; productId?: string; message: string }) => ({ ...error, fileName: file.originalName }));
+      const errors = Array.isArray(parsed) ? parsed : parsed?.errors ?? [];
+      return errors.map((error: { row: number; productId?: string; message: string }) => ({ ...error, fileName: file.originalName }));
     } catch { return []; }
   });
   const fileColumns = [
@@ -98,11 +105,13 @@ function ProductImportPanel() {
     { title: "结束日期", dataIndex: "weekEnd", key: "weekEnd", width: 112 },
     { title: "类目", dataIndex: "categoryName", key: "category", ellipsis: true },
     { title: "读取行数", dataIndex: "rowCount", key: "rows", width: 100 },
-    { title: "有效行", dataIndex: "validRows", key: "valid", width: 90 },
+    { title: "去重后有效", dataIndex: "validRows", key: "valid", width: 105 },
+    { title: "批次重复", dataIndex: "duplicateRows", key: "duplicateRows", width: 90, render: (value: number) => value ? <Typography.Text type="warning">{value}</Typography.Text> : 0 },
     { title: "异常行", dataIndex: "errorCount", key: "errors", width: 90, render: (value: number) => value ? <Typography.Text type="danger">{value}</Typography.Text> : 0 },
     { title: "状态", dataIndex: "status", key: "status", width: 110, render: (value: string) => <StatusTag status={value} /> },
   ];
   const previewColumns = [
+    { title: "榜单类型", dataIndex: "boardType", key: "boardType", width: 100, render: (value: string) => boardTypeLabel(value) },
     { title: "商品ID", dataIndex: "productId", key: "id", width: 140 },
     { title: "商品名称", dataIndex: "productName", key: "name", ellipsis: true },
     { title: "开始日期", dataIndex: "weekStart", key: "weekStart", width: 112 },
@@ -127,12 +136,13 @@ function ProductImportPanel() {
 
       {preview && <Card className="table-card" bordered={false}>
         <div className="section-heading"><div><Typography.Title level={4}>导入预览</Typography.Title><Typography.Text type="secondary">批次编号：{preview.batchId}</Typography.Text></div><StatusTag status={currentBatch?.status ?? preview.status} /></div>
-        <div className="import-summary-grid"><div><span>文件数</span><strong>{preview.totalFiles}</strong></div><div><span>读取数据行</span><strong>{preview.totalRows.toLocaleString()}</strong></div><div><span>有效数据行</span><strong>{preview.validRows.toLocaleString()}</strong></div><div><span>异常行</span><strong className={preview.errorRows ? "text-danger" : ""}>{preview.errorRows.toLocaleString()}</strong></div><div><span>重复文件</span><strong>{preview.duplicateFiles}</strong></div></div>
+        <div className="import-summary-grid product-import-summary-grid"><div><span>文件数</span><strong>{preview.totalFiles}</strong></div><div><span>读取数据行</span><strong>{preview.totalRows.toLocaleString()}</strong></div><div><span>去重后有效</span><strong>{preview.validRows.toLocaleString()}</strong></div><div><span>批次内重复行</span><strong>{preview.duplicateRows.toLocaleString()}</strong></div><div><span>异常行</span><strong className={preview.errorRows ? "text-danger" : ""}>{preview.errorRows.toLocaleString()}</strong></div><div><span>重复文件</span><strong>{preview.duplicateFiles}</strong></div></div>
         <Table rowKey="id" columns={fileColumns} dataSource={preview.files} pagination={false} size="small" scroll={{ x: 900 }} />
+        {preview.duplicateRows > 0 && <Alert type="info" showIcon message={`已在预览阶段识别 ${preview.duplicateRows} 条批次内重复记录`} description="相同榜单类型、商品ID、周期和类目的记录已归并，并保留导出时间最新的一条；确认导入时只会写入归并后的数据。" className="section-alert" />}
         {preview.files.some((file) => file.parseError) && <Alert type="error" showIcon message="部分文件无法解析" description={preview.files.filter((file) => file.parseError).map((file) => `${file.originalName}：${file.parseError}`).join("；")} className="section-alert" />}
         {preview.errorRows > 0 && <Alert type="warning" showIcon message={`发现 ${preview.errorRows} 行异常数据`} description="异常行不会写入数据库；其他通过校验的数据仍可正常导入。导入完成后可在批次详情中查看错误行号。" className="section-alert" />}
         {previewErrors.length > 0 && <Table rowKey={(row) => `${row.fileName}-${row.row}`} size="small" pagination={{ pageSize: 5 }} dataSource={previewErrors} columns={[{ title: "文件", dataIndex: "fileName", key: "file", ellipsis: true }, { title: "行号", dataIndex: "row", key: "row", width: 70 }, { title: "商品ID", dataIndex: "productId", key: "id", width: 130 }, { title: "错误原因", dataIndex: "message", key: "message" }]} />}
-        {preview.previewRows.length > 0 && <><div className="subsection-heading">数据样例（最多展示 20 行）</div><Table rowKey={(row) => `${row.productId}-${row.weekStart}`} columns={previewColumns} dataSource={preview.previewRows} pagination={false} size="small" scroll={{ x: 900 }} /></>}
+        {preview.previewRows.length > 0 && <><div className="subsection-heading">去重后数据样例（最多展示 20 行）</div><Table rowKey={(row) => `${row.boardType}-${row.productId}-${row.weekStart}-${row.categoryName}`} columns={previewColumns} dataSource={preview.previewRows} pagination={false} size="small" scroll={{ x: 1000 }} /></>}
         <div className="upload-actions"><div>{currentBatch?.status === "QUEUED" || currentBatch?.status === "PROCESSING" ? <Space><Progress type="circle" percent={currentBatch.status === "QUEUED" ? 10 : 65} size={28} showInfo={false} /><Typography.Text>正在后台导入，请勿关闭页面</Typography.Text></Space> : currentBatch?.status === "COMPLETED" ? <Typography.Text type="success"><CheckCircleOutlined /> 导入完成</Typography.Text> : <Typography.Text type="secondary">确认后才会写入商品和历史数据。</Typography.Text>}</div><Button type="primary" loading={confirming} disabled={!preview.validRows || Boolean(currentBatch && currentBatch.status !== "PREVIEW")} onClick={() => void confirmImport()}>确认导入 {preview.validRows.toLocaleString()} 行</Button></div>
         {currentBatch?.status === "COMPLETED" && <Alert type="success" showIcon message="本批次处理完成" description={`新增商品 ${currentBatch.newProducts} 件，新增历史 ${currentBatch.createdHistories} 条，更新历史 ${currentBatch.updatedHistories} 条，重复 ${currentBatch.duplicateRows} 条，异常 ${currentBatch.errorRows} 行。`} />}
         {currentBatch?.status === "FAILED" && <Alert type="error" showIcon message="导入失败" description="请查看批次详情或重新上传文件。" />}
@@ -141,7 +151,7 @@ function ProductImportPanel() {
       {!preview && currentBatch && <Card className="table-card" bordered={false}>
         <div className="section-heading"><div><Typography.Title level={4}>批次详情</Typography.Title><Typography.Text type="secondary">批次编号：{currentBatch.id}</Typography.Text></div><StatusTag status={currentBatch.status} /></div>
         <div className="import-summary-grid"><div><span>文件数</span><strong>{currentBatch.totalFiles}</strong></div><div><span>读取数据行</span><strong>{currentBatch.totalRows.toLocaleString()}</strong></div><div><span>成功入库</span><strong>{currentBatch.importedRows.toLocaleString()}</strong></div><div><span>重复记录</span><strong>{currentBatch.duplicateRows.toLocaleString()}</strong></div><div><span>异常行</span><strong>{currentBatch.errorRows.toLocaleString()}</strong></div></div>
-        <Table rowKey="id" size="small" dataSource={currentBatch.files} pagination={false} columns={[{ title: "文件名", dataIndex: "originalName", key: "name", ellipsis: true }, { title: "榜单类型", dataIndex: "boardType", key: "boardType", width: 110, render: (value: string | null) => boardTypeLabel(value) }, { title: "读取行数", dataIndex: "rowCount", key: "rows", width: 100 }, { title: "导入行数", dataIndex: "importedCount", key: "imported", width: 100 }, { title: "异常行", dataIndex: "errorCount", key: "errors", width: 90 }, { title: "状态", dataIndex: "status", key: "status", width: 110, render: (value: string) => <StatusTag status={value} /> }]} />
+        <Table rowKey="id" size="small" dataSource={currentBatch.files} pagination={false} columns={[{ title: "文件名", dataIndex: "originalName", key: "name", ellipsis: true }, { title: "榜单类型", dataIndex: "boardType", key: "boardType", width: 110, render: (value: string | null) => boardTypeLabel(value) }, { title: "读取行数", dataIndex: "rowCount", key: "rows", width: 100 }, { title: "导入行数", dataIndex: "importedCount", key: "imported", width: 100 }, { title: "批次重复", key: "duplicateRows", width: 90, render: (_: unknown, row: ImportBatch["files"][number]) => fileDuplicateCount(row.errorsJson) }, { title: "异常行", dataIndex: "errorCount", key: "errors", width: 90 }, { title: "状态", dataIndex: "status", key: "status", width: 110, render: (value: string) => <StatusTag status={value} /> }]} />
         {batchErrors.length > 0 && <><div className="subsection-heading">错误行明细（最多显示每个文件前 200 行）</div><Table rowKey={(row) => `${row.fileName}-${row.row}`} size="small" pagination={{ pageSize: 10 }} dataSource={batchErrors} columns={[{ title: "文件", dataIndex: "fileName", key: "file", ellipsis: true }, { title: "行号", dataIndex: "row", key: "row", width: 70 }, { title: "商品ID", dataIndex: "productId", key: "id", width: 130 }, { title: "错误原因", dataIndex: "message", key: "message" }]} /></>}
       </Card>}
 

@@ -97,6 +97,7 @@ a { color: #315efb; }
 .upload-drag-icon { color: #4777ff; font-size: 34px; margin: 10px 0 6px; }
 .upload-actions { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin-top: 16px; }
 .import-summary-grid { display: grid; grid-template-columns: repeat(5,minmax(0,1fr)); gap: 10px; margin-bottom: 18px; }
+.product-import-summary-grid { grid-template-columns: repeat(6,minmax(0,1fr)); }
 .import-summary-grid > div { background: #f7f9fc; border: 1px solid #edf0f5; border-radius: 10px; padding: 13px 15px; display: flex; flex-direction: column; gap: 5px; }
 .import-summary-grid span { font-size: 11px; color: #8c97a9; }
 .import-summary-grid strong { font-size: 20px; color: #293750; }
@@ -156,6 +157,7 @@ a { color: #315efb; }
   .filter-grid { grid-template-columns: repeat(2,minmax(0,1fr)); }
   .filter-grid > :first-child { grid-column: 1 / -1; }
   .import-summary-grid { grid-template-columns: repeat(2,minmax(0,1fr)); }
+  .product-import-summary-grid { grid-template-columns: repeat(2,minmax(0,1fr)); }
   .detail-product-main { align-items: flex-start; flex-direction: column; }
   .login-page { grid-template-columns: 1fr; }
   .login-left { min-height: 340px; padding: 28px 25px; }
