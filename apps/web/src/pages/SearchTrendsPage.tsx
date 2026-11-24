@@ -1,6 +1,6 @@
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Alert, Button, Card, DatePicker, Empty, Input, InputNumber, Pagination, Select, Table, Tag, Typography } from "antd";
+import { Alert, Button, Card, DatePicker, Empty, Input, InputNumber, Select, Space, Table, Tag, Typography } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import type { SorterResult } from "antd/es/table/interface";
 import { FilterOutlined, ReloadOutlined, SearchOutlined } from "@ant-design/icons";
@@ -586,21 +586,19 @@ export function SearchTrendsPage() {
             </div>
           </div>
           <div className="table-heading-actions">
-            <Pagination
-              size="small"
-              current={page}
-              pageSize={pageSize}
-              total={trendsQuery.data?.total ?? 0}
-              showSizeChanger
-              showLessItems
-              pageSizeOptions={[50, 100]}
-              showTotal={(total) => "共 " + total.toLocaleString() + " 个搜索词"}
-              onChange={(nextPage, nextSize) => {
-                setPage(nextPage);
-                setPageSize(nextSize);
-              }}
-            />
-            <Tag color="blue">日粒度</Tag>
+            <Space size={8}>
+              <Button size="small" disabled={page <= 1 || trendsQuery.isFetching} onClick={() => setPage((current) => Math.max(1, current - 1))}>上一页</Button>
+              <Typography.Text type="secondary">第 {page} / {Math.max(1, trendsQuery.data?.totalPages ?? 0)} 页</Typography.Text>
+              <Button size="small" disabled={!trendsQuery.data || page >= trendsQuery.data.totalPages || trendsQuery.isFetching} onClick={() => setPage((current) => current + 1)}>下一页</Button>
+              <Select
+                size="small"
+                value={pageSize}
+                options={[{ label: "50 条/页", value: 50 }, { label: "100 条/页", value: 100 }]}
+                onChange={(nextSize) => { setPageSize(nextSize); setPage(1); }}
+                style={{ width: 104 }}
+              />
+            </Space>
+            <Tag color="blue">共 {trendsQuery.data?.total ?? 0} 条</Tag>
           </div>
         </div>
         <div className="products-table-scroll" ref={tableWrapperRef}>

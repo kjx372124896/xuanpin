@@ -316,7 +316,6 @@ a { color: #315efb; }
 .search-trends-table-card .table-heading h4.ant-typography { font-size: 15px; margin: 0; white-space: nowrap; }
 .search-trends-table-card .table-heading .ant-typography-secondary { font-size: 11px; }
 .search-trends-table-card .table-heading-actions { display: flex; align-items: center; justify-content: flex-end; gap: 10px; margin-left: auto; min-width: 0; }
-.search-trends-table-card .table-heading-actions .ant-pagination { margin: 0; white-space: nowrap; }
 .search-trends-table-card .products-table-scroll { flex: 1 1 auto; height: auto; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
 .search-trends-table-card .ant-table-wrapper { flex: 1 1 auto; height: 100%; min-height: 0; overflow: hidden; }
 .search-trends-table-card .ant-table-container,
