@@ -66,9 +66,18 @@ test("25天有效记录与30天有效记录按日均比较", () => {
   assert.equal(calculateSearchTrendGrowthRate(previousDailyAverage, currentDailyAverage), 50);
 });
 
-test("上期无效或为0时增长率为空，当前为0时增长率为-100%", () => {
-  assert.equal(calculateSearchTrendGrowthRate(null, 10), null);
+test("对比期无有效数据且当期日均为正数时，对比增长率按100%计", () => {
+  assert.equal(calculateSearchTrendGrowthRate(null, 50_925), 100);
+  assert.equal(calculateSearchTrendGrowthRate(null, 10), 100);
+});
+
+test("当期无有效正数时不生成100%，原有零值及正常下降规则保持一致", () => {
+  assert.equal(calculateSearchTrendGrowthRate(null, null), null);
+  assert.equal(calculateSearchTrendGrowthRate(null, 0), null);
+  assert.equal(calculateSearchTrendGrowthRate(null, NaN), null);
+  assert.equal(calculateSearchTrendGrowthRate(null, Infinity), null);
   assert.equal(calculateSearchTrendGrowthRate(0, 10), null);
   assert.equal(calculateSearchTrendGrowthRate(10, null), null);
   assert.equal(calculateSearchTrendGrowthRate(10, 0), -100);
+  assert.equal(calculateSearchTrendGrowthRate(100, 50), -50);
 });

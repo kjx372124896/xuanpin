@@ -34,6 +34,11 @@ export function buildSearchTrendComparisonPeriods(
 }
 
 export function calculateSearchTrendGrowthRate(previousDailyAverage: number | null, currentDailyAverage: number | null) {
+  // A newly observed term has no comparison-period data; use the agreed 100%
+  // business value when the current period has a positive daily average.
+  if (previousDailyAverage === null && currentDailyAverage !== null && Number.isFinite(currentDailyAverage) && currentDailyAverage > 0) {
+    return 100;
+  }
   if (previousDailyAverage === null || currentDailyAverage === null || !Number.isFinite(previousDailyAverage) || !Number.isFinite(currentDailyAverage) || previousDailyAverage <= 0) {
     return null;
   }

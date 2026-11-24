@@ -302,3 +302,44 @@ integration("PostgreSQL：搜索趋势按一级、二级类目组合筛选，日
     await prisma!.importBatch.delete({ where: { id: source.id } });
   }
 });
+
+integration("PostgreSQL：对比期缺失的正数搜索词按100%展示、筛选和排序，正常增长率不受影响", async () => {
+  const source = await sourceFiles();
+  const prefix = `growth-${unique()}`;
+  const row = (name: string, searchDate: string, value: number) => ({
+    searchTerm: `${prefix}-${name}`, categoryName: "增长率测试", categoryLevel1: "增长率测试", categoryLevel2: "无二级类目",
+    searchTermType: "核心词", boardType: "热搜榜", dimension: "日", searchDate,
+    searchPeopleRaw: String(value), searchPeopleMedian: value, sourceFileId: source.files[0].id,
+  });
+  try {
+    await upsertHistories(prisma!, "search", [
+      ...["2026-10-01", "2026-10-02", "2026-10-03", "2026-10-04"].map((date) => row("new", date, 50_925)),
+      row("normal", "2026-09-01", 100), row("normal", "2026-10-01", 150),
+      row("high", "2026-09-01", 100), row("high", "2026-10-01", 250),
+      row("empty-zero", "2026-10-01", 0),
+      row("previous-zero", "2026-09-01", 0), row("previous-zero", "2026-10-01", 10),
+    ]);
+    const service = new SearchTrendsService(prisma as never);
+    const filters = { startDate: "2026-10-01", endDate: "2026-10-31", keyword: prefix, sortBy: "growthRate", sortOrder: "desc" };
+    const all = await service.list(filters);
+    assert.equal(all.total, 5);
+    assert.deepEqual(all.items.map((item) => item.growthRate), [150, 100, 50, null, null]);
+    const fresh = all.items.find((item) => item.searchTerm === `${prefix}-new`)!;
+    assert.equal(fresh.previousDailyAverage, null);
+    assert.equal(fresh.previousDaysWithData, 0);
+    assert.equal(fresh.currentDailyAverage, 50_925);
+    assert.equal(fresh.currentDaysWithData, 4);
+    assert.equal(fresh.growthRate, 100);
+    const atLeast100 = await service.list({ ...filters, minGrowthRate: 100 });
+    assert.equal(atLeast100.total, 2);
+    assert.deepEqual(atLeast100.items.map((item) => item.growthRate), [150, 100]);
+    const above100 = await service.list({ ...filters, minGrowthRate: 101 });
+    assert.equal(above100.total, 1);
+    assert.equal(above100.items[0].growthRate, 150);
+    const ascending = await service.list({ ...filters, sortOrder: "asc" });
+    assert.deepEqual(ascending.items.map((item) => item.growthRate), [50, 100, 150, null, null]);
+  } finally {
+    await prisma!.searchTermHistory.deleteMany({ where: { searchTerm: { startsWith: prefix } } });
+    await prisma!.importBatch.delete({ where: { id: source.id } });
+  }
+});

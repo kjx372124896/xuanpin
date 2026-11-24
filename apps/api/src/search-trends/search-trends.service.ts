@@ -303,6 +303,7 @@ export class SearchTrendsService {
       period_metrics AS (
         SELECT period_averages.*,
                CASE
+                 WHEN "previousDailyAverage" IS NULL AND "currentDailyAverage" > 0 THEN 100
                  WHEN "previousDailyAverage" IS NULL OR "previousDailyAverage" <= 0 OR "currentDailyAverage" IS NULL THEN NULL
                  ELSE (("currentDailyAverage" - "previousDailyAverage") / "previousDailyAverage") * 100
                END AS "growthRate"
