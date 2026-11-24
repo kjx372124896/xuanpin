@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { after, test } from "node:test";
-import { PrismaClient, type ImportBatch } from "@prisma/client";
+import { PrismaClient, type ImportBatch, type User } from "@prisma/client";
 import ExcelJS from "exceljs";
 import { randomBytes } from "node:crypto";
 import { mkdtemp, rm, stat } from "node:fs/promises";
@@ -25,6 +25,67 @@ const prisma = databaseUrl ? new PrismaClient({ datasourceUrl: databaseUrl }) : 
 after(async () => { await prisma?.$disconnect(); });
 const integration = (name: string, run: () => Promise<void>) => test(name, { skip: !prisma }, run);
 const unique = () => randomBytes(10).toString("hex");
+
+integration("PostgreSQL：搜索词收藏隔离账号和分组，成员筛选、计数分页及幂等取消保持一致", async () => {
+  const prefix = `favorite-${unique()}`;
+  const userIds: string[] = [];
+  try {
+    const users: User[] = [];
+    for (const [index, role] of ["EMPLOYEE", "EMPLOYEE", "ADMIN", "ADMIN"].entries()) {
+      const user = await prisma!.user.create({ data: {
+        username: `${prefix}-${index}`, passwordHash: "integration-fixture", name: `${prefix}-成员${index}`,
+        department: `${prefix}-部门${index}`, role: role as "EMPLOYEE" | "ADMIN",
+      } });
+      users.push(user);
+      userIds.push(user.id);
+    }
+    const identities = Array.from({ length: 12 }, (_, index) => ({
+      searchTerm: `${prefix}-${index}`, categoryName: "收藏测试类目", searchTermType: "核心词", boardType: "热搜榜", dimension: "日",
+    }));
+    const otherCategory = { ...identities[0], categoryName: "另一个类目" };
+    const otherAdminOnly = { ...identities[0], searchTerm: `${prefix}-other-admin` };
+    await prisma!.searchTermHistory.createMany({ data: [...identities, otherCategory, otherAdminOnly].map((identity, index) => ({
+      ...identity, categoryLevel1: identity.categoryName, categoryLevel2: "无二级类目",
+      searchDate: new Date("2026-10-31T00:00:00Z"), rank: index + 1, searchPeopleMedian: 100,
+    })) });
+    const service = new SearchTrendsService(prisma as never);
+    for (const identity of identities) await service.favorite(users[0].id, identity);
+    await service.favorite(users[0].id, identities[0]);
+    await service.favorite(users[1].id, identities[0]);
+    await service.favorite(users[2].id, identities[1]);
+    await service.favorite(users[3].id, otherAdminOnly);
+    const filters = { startDate: "2026-10-01", endDate: "2026-10-31", keyword: prefix, pageSize: 10 };
+    const mine = await service.list({ ...filters, favoritesOnly: true }, { userId: users[0].id });
+    assert.equal(mine.total, 12);
+    assert.equal(mine.items.length, 10);
+    assert.ok(mine.items.every((item) => item.isFavorited && item.categoryName === identities[0].categoryName));
+    const second = await service.list({ ...filters, favoritesOnly: true, page: 2 }, { userId: users[0].id });
+    assert.equal(second.total, 12);
+    assert.equal(second.items.length, 2);
+    const anotherMember = await service.list({ ...filters, favoritesOnly: true }, { userId: users[1].id });
+    assert.equal(anotherMember.total, 1);
+    const viewer = { userId: users[2].id, teamFavorites: true };
+    const team = await service.list({ ...filters, pageSize: 50 }, viewer);
+    assert.equal(team.total, 12);
+    assert.equal(team.items[0].favoriteCount, 2);
+    assert.equal(team.items[0].isFavorited, false);
+    assert.equal(team.items[1].isFavorited, true);
+    assert.ok(team.items[0].favoriteUsers?.some((user) => user.userId === users[1].id));
+    const member = await service.list(filters, { ...viewer, memberKeyword: users[1].department! });
+    assert.equal(member.total, 1);
+    assert.equal(member.items[0].favoriteCount, 1);
+    assert.equal(member.items[0].favoriteUsers?.[0].userId, users[1].id);
+    await service.unfavorite(users[0].id, identities[0]);
+    await service.unfavorite(users[0].id, identities[0]);
+    assert.equal((await service.list({ ...filters, favoritesOnly: true }, { userId: users[0].id })).total, 11);
+    assert.equal((await service.list(filters, viewer)).total, 12);
+    await service.unfavorite(users[1].id, identities[0]);
+    assert.equal((await service.list(filters, viewer)).total, 11);
+  } finally {
+    await prisma!.user.deleteMany({ where: { id: { in: userIds } } });
+    await prisma!.searchTermHistory.deleteMany({ where: { searchTerm: { startsWith: prefix } } });
+  }
+});
 
 async function sourceFiles() {
   return prisma!.importBatch.create({ data: { files: { create: ["old", "new"].map((name) => ({

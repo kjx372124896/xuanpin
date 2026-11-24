@@ -210,7 +210,7 @@ a { color: #315efb; }
  * text-align:center + flex居中：让“商品搜索”等标签不再贴左边，而是在标签区域中间显示。
  * width:100px、字体、颜色和文字不换行规则保持原样；这里只改文字对齐，不改变控件尺寸。
  */
-.filter-card-compact .filter-field > label { display: flex; align-items: center; justify-content: center; width: 100px; text-align: center; overflow: hidden; color: #58657a; font-size: 10px; line-height: 1.25; white-space: nowrap; }
+.filter-card-compact .filter-field > label:not(.ant-checkbox-wrapper) { display: flex; align-items: center; justify-content: center; width: 100px; text-align: center; overflow: hidden; color: #58657a; font-size: 10px; line-height: 1.25; white-space: nowrap; }
 
 /* 普通输入框/下拉框占满标签右侧剩余空间，不要改成固定百分比，否则容易出现宽度不齐。 */
 .filter-card-compact .filter-field > .ant-select,
@@ -295,13 +295,15 @@ a { color: #315efb; }
 .search-trend-filter-card { flex: 0 0 auto; }
 .search-trend-filter-grid { width: 100%; min-width: 1380px; grid-template-columns: repeat(5,210px) 270px; justify-content: space-between; grid-auto-flow: row; gap: 10px 12px; align-items: center; }
 .search-trend-filter-grid .filter-field { display: grid; grid-template-columns: 70px minmax(0,1fr); align-items: center; gap: 10px; min-width: 0; }
-.search-trend-filter-grid .filter-field > label { display: flex; align-items: center; justify-content: center; width: 70px; color: #58657a; font-size: 10px; line-height: 1.25; white-space: nowrap; }
+.search-trend-filter-grid .filter-field > label:not(.ant-checkbox-wrapper) { display: flex; align-items: center; justify-content: center; width: 70px; color: #58657a; font-size: 10px; line-height: 1.25; white-space: nowrap; }
 .search-trend-filter-grid .filter-field > .ant-select,
 .search-trend-filter-grid .filter-field > .ant-input,
 .search-trend-filter-grid .filter-field > .ant-input-affix-wrapper,
 .search-trend-filter-grid .filter-field > .ant-picker { width: 100%; min-width: 0; justify-self: stretch; }
 .search-trend-filter-grid .filter-field-listing-date { grid-column: 1 / span 2; grid-row: 2; }
-.search-trend-filter-grid .search-trend-field-comparison-mode { grid-column: 3 / span 2; grid-row: 2; }
+.search-trend-filter-grid .search-trend-field-comparison-mode { grid-column: 3; grid-row: 2; }
+.search-trend-filter-grid .search-trend-field-favorites { grid-column: 4; grid-row: 2; }
+.search-trend-filter-grid .search-trend-field-favorites .ant-checkbox-wrapper { font-size: 11px; }
 .search-trend-filter-grid .search-trend-field-min-growth { grid-column: 5; grid-row: 2; }
 .search-trend-filter-grid .filter-range-control { display: grid; grid-template-columns: minmax(0,1fr) 10px minmax(0,1fr); align-items: center; gap: 5px; width: 100%; min-width: 0; }
 .search-trend-filter-grid .filter-range-control .ant-input-number { width: 100%; min-width: 0; }
@@ -328,6 +330,10 @@ a { color: #315efb; }
 .search-trends-table-card .ant-table-tbody > tr > td { padding: 7px 10px; }
 .search-term-cell { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
 .search-term-cell .ant-typography { overflow-wrap: anywhere; }
+.search-term-with-favorite { display: flex; align-items: flex-start; gap: 4px; min-width: 0; }
+.search-term-with-favorite > .favorite-button { flex: 0 0 22px; width: 22px; height: 22px; padding: 0; font-size: 13px; }
+.search-term-with-favorite > .search-term-cell { flex: 1; }
+.search-trend-favorite-members { display: flex; flex-wrap: wrap; align-items: center; gap: 3px; font-size: 11px; overflow-wrap: anywhere; }
 .search-trends-table-card .search-term-cell { gap: 2px; }
 .search-trends-table-card .search-term-cell .ant-typography { font-size: 12px; line-height: 1.35; }
 .latest-rank-cell { display: flex; min-width: 0; flex-direction: column; align-items: center; gap: 3px; }

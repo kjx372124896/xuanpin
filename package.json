@@ -1,6 +1,6 @@
 {
   "name": "selection-tool",
-  "version": "0.5.8",
+  "version": "0.5.9",
   "private": true,
   "packageManager": "pnpm@10.34.9",
   "scripts": {

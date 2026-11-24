@@ -1,11 +1,12 @@
-import { memo, useEffect, useMemo, useRef, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { Alert, Button, Card, DatePicker, Empty, Input, InputNumber, Select, Space, Table, Tag, Typography } from "antd";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { Alert, Button, Card, Checkbox, DatePicker, Empty, Input, InputNumber, Segmented, Select, Space, Table, Tag, Tooltip, Typography, message } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import type { SorterResult } from "antd/es/table/interface";
-import { FilterOutlined, ReloadOutlined, SearchOutlined } from "@ant-design/icons";
+import { FilterOutlined, ReloadOutlined, SearchOutlined, StarFilled, StarOutlined } from "@ant-design/icons";
 import dayjs, { type Dayjs } from "dayjs";
 import { api, errorMessage } from "../api";
+import { useAuth } from "../auth/AuthContext";
 
 interface SearchMetric {
   raw: string | null;
@@ -28,6 +29,9 @@ interface SearchTrendPoint {
   comparisonMedian: number | null;
 }
 interface SearchTrendItem {
+  isFavorited: boolean;
+  favoriteCount?: number;
+  favoriteUsers?: Array<{ userId: string; name: string; username: string; department: string | null; favoritedAt: string }>;
   searchTerm: string;
   categoryName: string;
   classificationName: string | null;
@@ -83,6 +87,8 @@ interface SearchFilters {
   searchPeopleMax?: number;
   comparisonMode?: "previousMonth" | "previousYear";
   minGrowthRate?: number;
+  favoritesOnly?: boolean;
+  memberKeyword?: string;
 }
 
 interface SearchTrendSort {
@@ -238,10 +244,16 @@ const DailySearchTrend = memo(function DailySearchTrend({ points }: { points: Se
   );
 });
 function itemKey(item: SearchTrendItem) {
-  return [item.searchTerm, item.categoryName, item.searchTermType, item.boardType, item.dimension].join("|");
+  return JSON.stringify([item.searchTerm, item.categoryName, item.searchTermType, item.boardType, item.dimension]);
 }
 
 export function SearchTrendsPage() {
+  const { user } = useAuth();
+  const isAdmin = user?.role === "ADMIN" || user?.role === "SUPER_ADMIN";
+  const queryClient = useQueryClient();
+  const [teamFavoritesMode, setTeamFavoritesMode] = useState(false);
+  const showTeamFavorites = isAdmin && teamFavoritesMode;
+  const [favoriteLoadingKey, setFavoriteLoadingKey] = useState<string | null>(null);
   const [draft, setDraft] = useState<SearchFilters>({});
   const [filters, setFilters] = useState<SearchFilters>({});
   const [page, setPage] = useState(1);
@@ -280,8 +292,8 @@ export function SearchTrendsPage() {
   }, [optionsQuery.data?.latestDate, optionsQuery.isLoading, initialized]);
 
   const trendsQuery = useQuery({
-    queryKey: ["searchTrends", filters, page, pageSize, sort],
-    queryFn: async () => {
+    queryKey: ["searchTrends", user?.id, showTeamFavorites, filters, page, pageSize, sort],
+    queryFn: async ({ signal }) => {
       const params: Record<string, string | number> = {
         page,
         pageSize,
@@ -299,7 +311,10 @@ export function SearchTrendsPage() {
       if (filters.searchPeopleMin !== undefined) params.searchPeopleMin = filters.searchPeopleMin;
       if (filters.searchPeopleMax !== undefined) params.searchPeopleMax = filters.searchPeopleMax;
       if (filters.minGrowthRate !== undefined) params.minGrowthRate = filters.minGrowthRate;
-      return (await api.get<SearchTrendResult>("/search-trends", { params })).data;
+      if (showTeamFavorites) {
+        if (filters.memberKeyword?.trim()) params.memberKeyword = filters.memberKeyword.trim();
+      } else if (filters.favoritesOnly) params.favoritesOnly = "true";
+      return (await api.get<SearchTrendResult>(showTeamFavorites ? "/search-trends/team-favorites" : "/search-trends", { params, signal })).data;
     },
     // 等待筛选选项返回并写入默认日期后再查询，避免先发无日期请求、随后又发默认日期请求。
     enabled: initialized,
@@ -308,7 +323,7 @@ export function SearchTrendsPage() {
   useEffect(() => {
     const tableBody = tableWrapperRef.current?.querySelector<HTMLElement>(".ant-table-body");
     if (tableBody) tableBody.scrollTop = 0;
-  }, [page, pageSize, filters, sort]);
+  }, [page, pageSize, filters, sort, showTeamFavorites]);
 
   useEffect(() => {
     const container = tableWrapperRef.current;
@@ -339,6 +354,24 @@ export function SearchTrendsPage() {
     if (heading) observer.observe(heading);
     return () => observer.disconnect();
   }, []);
+
+  const toggleFavorite = useCallback(async (item: SearchTrendItem) => {
+    setFavoriteLoadingKey(itemKey(item));
+    const identity = {
+      searchTerm: item.searchTerm, categoryName: item.categoryName,
+      searchTermType: item.searchTermType, boardType: item.boardType, dimension: item.dimension,
+    };
+    try {
+      if (item.isFavorited) await api.delete("/search-trends/favorite", { data: identity });
+      else await api.post("/search-trends/favorite", identity);
+      if (filters.favoritesOnly || showTeamFavorites) setPage(1);
+      await queryClient.invalidateQueries({ queryKey: ["searchTrends"] });
+    } catch (error) {
+      message.error("收藏操作失败：" + errorMessage(error));
+    } finally {
+      setFavoriteLoadingKey(null);
+    }
+  }, [filters.favoritesOnly, showTeamFavorites, queryClient]);
 
   const columns = useMemo<ColumnsType<SearchTrendItem>>(() => [
     {
@@ -373,12 +406,38 @@ export function SearchTrendsPage() {
       key: "searchTerm",
       width: 130,
       render: (value: string, item) => (
-        <div className="search-term-cell">
-          <Typography.Text strong>{value}</Typography.Text>
-          {item.classificationName && item.classificationName !== item.categoryName && <Typography.Text type="secondary">{item.classificationName}</Typography.Text>}
+        <div className="search-term-with-favorite">
+          <Tooltip title={item.isFavorited ? "取消收藏" : "收藏搜索词"}>
+            <Button
+              type="text"
+              size="small"
+              className={item.isFavorited ? "favorite-button is-favorited" : "favorite-button"}
+              icon={item.isFavorited ? <StarFilled /> : <StarOutlined />}
+              loading={favoriteLoadingKey === itemKey(item)}
+              disabled={favoriteLoadingKey !== null && favoriteLoadingKey !== itemKey(item)}
+              aria-label={item.isFavorited ? "取消收藏" : "收藏搜索词"}
+              aria-pressed={item.isFavorited}
+              onClick={() => void toggleFavorite(item)}
+            />
+          </Tooltip>
+          <div className="search-term-cell">
+            <Typography.Text strong>{value}</Typography.Text>
+            {item.classificationName && item.classificationName !== item.categoryName && <Typography.Text type="secondary">{item.classificationName}</Typography.Text>}
+          </div>
         </div>
       ),
     },
+    ...(showTeamFavorites ? [{
+      title: "收藏成员",
+      key: "favoriteMembers",
+      width: 150,
+      render: (_value: unknown, item: SearchTrendItem) => {
+        const members = item.favoriteUsers ?? [];
+        return <Tooltip title={members.map((member) => `${member.name}（${member.username}）${member.department ? ` · ${member.department}` : ""}`).join("、")}>
+          <div className="search-trend-favorite-members">{members.slice(0, 3).map((member) => member.name).join("、")}{members.length > 3 ? ` 等 ${members.length} 人` : ""}<Tag>{item.favoriteCount ?? members.length} 人</Tag></div>
+        </Tooltip>;
+      },
+    }] : []),
     {
       title: "对比期日均",
       dataIndex: "previousDailyAverage",
@@ -420,7 +479,7 @@ export function SearchTrendsPage() {
       key: "trend",
       render: (_value, item) => <DailySearchTrend points={item.trend} />,
     },
-  ], [sort]);
+  ], [sort, showTeamFavorites, favoriteLoadingKey, toggleFavorite]);
 
   function applyFilters() {
     setPage(1);
@@ -560,6 +619,15 @@ export function SearchTrendsPage() {
               style={{ width: "100%" }}
             />
           </div>
+          <div className="filter-field filter-field-favorites search-trend-field-favorites">
+            {showTeamFavorites ? <>
+              <label htmlFor="search-favorite-member">收藏成员</label>
+              <Input id="search-favorite-member" allowClear placeholder="姓名/账号/部门" value={draft.memberKeyword} onChange={(event) => setDraft((current) => ({ ...current, memberKeyword: event.target.value }))} onPressEnter={applyFilters} />
+            </> : <>
+              <label htmlFor="search-favorites">收藏范围</label>
+              <Checkbox id="search-favorites" checked={draft.favoritesOnly ?? false} onChange={(event) => setDraft((current) => ({ ...current, favoritesOnly: event.target.checked || undefined }))}>仅看我的收藏</Checkbox>
+            </>}
+          </div>
           <div className="filter-actions search-trend-filter-actions">
             <Button type="primary" onClick={applyFilters}>查询</Button>
             <Button onClick={resetFilters}>重置</Button>
@@ -579,13 +647,19 @@ export function SearchTrendsPage() {
         <div className="table-heading">
           <div className="table-heading-title">
             <div className="table-heading-copy">
-              <Typography.Title level={4}>搜索词列表</Typography.Title>
+              <Typography.Title level={4}>{showTeamFavorites ? "成员收藏" : "搜索词列表"}</Typography.Title>
               <Typography.Text type="secondary">
                 {trendsQuery.data ? trendsQuery.data.startDate + " 至 " + trendsQuery.data.endDate + " · 共 " + trendsQuery.data.total.toLocaleString() + " 个搜索词" : "每行展示一个搜索词及其日搜索人数趋势"}
               </Typography.Text>
             </div>
           </div>
           <div className="table-heading-actions">
+            {isAdmin && <Segmented
+              size="small"
+              value={showTeamFavorites ? "team" : "all"}
+              options={[{ label: "全部搜索词", value: "all" }, { label: "成员收藏", value: "team" }]}
+              onChange={(value) => { setTeamFavoritesMode(value === "team"); setPage(1); }}
+            />}
             <Space size={8}>
               <Button size="small" disabled={page <= 1 || trendsQuery.isFetching} onClick={() => setPage((current) => Math.max(1, current - 1))}>上一页</Button>
               <Typography.Text type="secondary">第 {page} / {Math.max(1, trendsQuery.data?.totalPages ?? 0)} 页</Typography.Text>

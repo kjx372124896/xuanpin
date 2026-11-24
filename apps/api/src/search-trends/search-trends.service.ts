@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, ServiceUnavailableException } from "@nestjs/common";
+import { BadRequestException, Injectable, NotFoundException, ServiceUnavailableException } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
 import { buildSearchTrendComparisonPeriods, calculateSearchTrendGrowthRate, shiftUtcMonthsClamped, type SearchTrendComparisonMode } from "./search-trends.helpers";
@@ -20,7 +20,41 @@ type SearchTrendFilters = {
   sortOrder?: string;
   page?: string | number;
   pageSize?: string | number;
+  favoritesOnly?: string | boolean;
 };
+
+type SearchTrendViewer = { userId?: string; teamFavorites?: boolean; memberKeyword?: string };
+type SearchTermIdentity = {
+  searchTerm: string;
+  categoryName: string;
+  searchTermType: string;
+  boardType: string;
+  dimension: string;
+};
+
+function parseFavoriteIdentity(body: unknown): SearchTermIdentity {
+  if (!body || typeof body !== "object" || Array.isArray(body)) throw new BadRequestException("搜索词收藏参数无效。");
+  const values = body as Record<string, unknown>;
+  const limits = { searchTerm: 500, categoryName: 255, searchTermType: 80, boardType: 80, dimension: 20 };
+  for (const [field, limit] of Object.entries(limits)) {
+    const value = values[field];
+    if (typeof value !== "string" || !value.trim() || value.length > limit) {
+      throw new BadRequestException("搜索词收藏参数无效：" + field);
+    }
+  }
+  if (values.dimension !== "日") throw new BadRequestException("仅支持收藏日搜索趋势。");
+  return {
+    searchTerm: values.searchTerm as string,
+    categoryName: values.categoryName as string,
+    searchTermType: values.searchTermType as string,
+    boardType: values.boardType as string,
+    dimension: values.dimension as string,
+  };
+}
+
+function identityOf(value: SearchTermIdentity): SearchTermIdentity {
+  return { searchTerm: value.searchTerm, categoryName: value.categoryName, searchTermType: value.searchTermType, boardType: value.boardType, dimension: value.dimension };
+}
 
 type SearchGroupRow = {
   searchTerm: string;
@@ -191,11 +225,32 @@ export class SearchTrendsService {
     }
   }
 
-  async list(filters: SearchTrendFilters) {
-    return this.withListQuerySlot(() => this.listInternal(filters));
+  async favorite(userId: string, body: unknown) {
+    const identity = parseFavoriteIdentity(body);
+    const exists = await this.prisma.searchTermHistory.findFirst({ where: identity, select: { id: true } });
+    if (!exists) throw new NotFoundException("搜索词不存在。");
+    await this.prisma.searchTermFavorite.upsert({
+      where: { userId_searchTerm_categoryName_searchTermType_boardType_dimension: { userId, ...identity } },
+      create: { userId, ...identity },
+      update: {},
+    });
+    return { ...identity, isFavorited: true };
   }
 
-  private async listInternal(filters: SearchTrendFilters) {
+  async unfavorite(userId: string, body: unknown) {
+    const identity = parseFavoriteIdentity(body);
+    await this.prisma.searchTermFavorite.deleteMany({ where: { userId, ...identity } });
+    return { ...identity, isFavorited: false };
+  }
+
+  async list(filters: SearchTrendFilters, viewer: SearchTrendViewer = {}) {
+    if ((viewer.teamFavorites || filters.favoritesOnly === true || filters.favoritesOnly === "true") && !viewer.userId) {
+      throw new BadRequestException("收藏查询缺少当前用户。");
+    }
+    return this.withListQuerySlot(() => this.listInternal(filters, viewer));
+  }
+
+  private async listInternal(filters: SearchTrendFilters, viewer: SearchTrendViewer) {
     // 前端通常会传入完整日期范围；只有缺少任一端点时才需要查询最新日期来补默认值。
     const latestDate = !filters.startDate || !filters.endDate
       ? (await this.prisma.searchTermHistory.aggregate({ _max: { searchDate: true } }))._max.searchDate ?? new Date()
@@ -252,6 +307,30 @@ export class SearchTrendsService {
     const whereSql = Prisma.join(conditions, " AND ");
     const periodWhereSql = Prisma.join(periodConditions, " AND ");
     const selectedConditions: Prisma.Sql[] = [];
+    const memberKeyword = viewer.memberKeyword?.trim();
+    const memberWhere: Prisma.UserWhereInput = {
+      AND: [
+        { OR: [{ role: "EMPLOYEE" }, { id: viewer.userId }] },
+        ...(memberKeyword ? [{ OR: [
+          { name: { contains: memberKeyword, mode: "insensitive" as const } },
+          { username: { contains: memberKeyword, mode: "insensitive" as const } },
+          { department: { contains: memberKeyword, mode: "insensitive" as const } },
+        ] }] : []),
+      ],
+    };
+    if (viewer.teamFavorites || filters.favoritesOnly === true || filters.favoritesOnly === "true") {
+      const ownerSql = viewer.teamFavorites
+        ? Prisma.sql`(member."用户角色" = 'EMPLOYEE' OR member."用户ID" = ${viewer.userId})
+            ${memberKeyword ? Prisma.sql`AND (member."员工姓名" ILIKE ${"%" + memberKeyword + "%"} OR member."登录账号" ILIKE ${"%" + memberKeyword + "%"} OR member."所属部门" ILIKE ${"%" + memberKeyword + "%"})` : Prisma.empty}`
+        : Prisma.sql`favorite."用户ID" = ${viewer.userId}`;
+      selectedConditions.push(Prisma.sql`EXISTS (
+        SELECT 1 FROM "搜索词收藏表" favorite
+        JOIN "系统用户表" member ON member."用户ID" = favorite."用户ID"
+        WHERE favorite."搜索词" = latest."搜索词" AND favorite."类目" = latest."类目"
+          AND favorite."搜索词类型" = latest."搜索词类型" AND favorite."搜索榜单类型" = latest."搜索榜单类型"
+          AND favorite."统计维度" = latest."统计维度" AND ${ownerSql}
+      )`);
+    }
     if (min !== undefined) selectedConditions.push(Prisma.sql`latest."搜索人数中值" >= ${min}`);
     if (max !== undefined) selectedConditions.push(Prisma.sql`latest."搜索人数中值" <= ${max}`);
     if (minGrowth !== undefined) selectedConditions.push(Prisma.sql`metrics."growthRate" >= ${minGrowth}`);
@@ -377,37 +456,53 @@ export class SearchTrendsService {
       return { items: [], page, pageSize, total, totalPages: Math.ceil(total / pageSize), startDate: dateKey(startDate), endDate: dateKey(endDate), comparison };
     }
 
-    const trendRows = await this.prisma.searchTermHistory.findMany({
-      where: {
-        AND: [
-          { OR: [
-            { searchDate: { gte: periods.currentStartDate, lte: periods.currentEndDate } },
-            { searchDate: { gte: periods.previousStartDate, lte: periods.previousEndDate } },
-          ] },
-          { OR: groups.map((group) => ({
-            searchTerm: group.searchTerm,
-            categoryName: group.categoryName,
-            searchTermType: group.searchTermType,
-            boardType: group.boardType,
-            dimension: group.dimension,
-          })) },
-        ],
-      },
-      orderBy: [{ searchDate: "asc" }, { searchTerm: "asc" }],
-      select: {
-        searchTerm: true,
-        categoryName: true,
-        searchTermType: true,
-        boardType: true,
-        dimension: true,
-        searchDate: true,
-        rank: true,
-        searchPeopleRaw: true,
-        searchPeopleMin: true,
-        searchPeopleMax: true,
-        searchPeopleMedian: true,
-      },
-    });
+    const [trendRows, favoriteRows, teamFavoriteRows] = await Promise.all([
+      this.prisma.searchTermHistory.findMany({
+        where: {
+          AND: [
+            { OR: [
+              { searchDate: { gte: periods.currentStartDate, lte: periods.currentEndDate } },
+              { searchDate: { gte: periods.previousStartDate, lte: periods.previousEndDate } },
+            ] },
+            { OR: groups.map(identityOf) },
+          ],
+        },
+        orderBy: [{ searchDate: "asc" }, { searchTerm: "asc" }],
+        select: {
+          searchTerm: true,
+          categoryName: true,
+          searchTermType: true,
+          boardType: true,
+          dimension: true,
+          searchDate: true,
+          rank: true,
+          searchPeopleRaw: true,
+          searchPeopleMin: true,
+          searchPeopleMax: true,
+          searchPeopleMedian: true,
+        },
+      }),
+      viewer.userId ? this.prisma.searchTermFavorite.findMany({
+        where: { userId: viewer.userId, OR: groups.map(identityOf) },
+        select: { searchTerm: true, categoryName: true, searchTermType: true, boardType: true, dimension: true },
+      }) : Promise.resolve([]),
+      viewer.teamFavorites ? this.prisma.searchTermFavorite.findMany({
+        where: { user: memberWhere, OR: groups.map(identityOf) },
+        select: {
+          searchTerm: true, categoryName: true, searchTermType: true, boardType: true, dimension: true, createdAt: true,
+          user: { select: { id: true, name: true, username: true, department: true } },
+        },
+        orderBy: [{ createdAt: "desc" }, { userId: "asc" }],
+      }) : Promise.resolve([]),
+    ]);
+    const ownFavoriteKeys = new Set(favoriteRows.map(groupKey));
+    const favoritesByGroup = new Map<string, typeof teamFavoriteRows>();
+    for (const favorite of teamFavoriteRows) {
+      const key = groupKey(favorite);
+      const members = favoritesByGroup.get(key) ?? [];
+      members.push(favorite);
+      favoritesByGroup.set(key, members);
+    }
 
     const rowsByGroup = new Map<string, Map<string, typeof trendRows[number]>>();
     for (const row of trendRows) {
@@ -449,6 +544,14 @@ export class SearchTrendsService {
         };
       });
       return {
+        isFavorited: ownFavoriteKeys.has(groupKey(group)),
+        ...(viewer.teamFavorites ? {
+          favoriteCount: (favoritesByGroup.get(groupKey(group)) ?? []).length,
+          favoriteUsers: (favoritesByGroup.get(groupKey(group)) ?? []).map((favorite) => ({
+            userId: favorite.user.id, name: favorite.user.name, username: favorite.user.username,
+            department: favorite.user.department, favoritedAt: favorite.createdAt.toISOString(),
+          })),
+        } : {}),
         searchTerm: group.searchTerm,
         categoryName: group.categoryName,
         classificationName: group.classificationName,

@@ -333,6 +333,7 @@ model User {
   deviceAuditLogs              DeviceAuditLog[]      @relation("DeviceAuditTarget")
   actedDeviceAuditLogs         DeviceAuditLog[]      @relation("DeviceAuditActor")
   favorites                    ProductFavorite[]
+  searchTermFavorites          SearchTermFavorite[]
   dmpCredential                DmpCredential?
   dmpAiRuns                    DmpAiRun[]
   dmpExtensionLink             DmpExtensionLink?
@@ -422,6 +423,21 @@ model ProductFavorite {
   @@id([userId, productId])
   @@index([productId])
   @@map("商品收藏表")
+}
+
+model SearchTermFavorite {
+  userId         String   @map("用户ID") @db.VarChar(30)
+  searchTerm     String   @map("搜索词") @db.VarChar(500)
+  categoryName   String   @map("类目") @db.VarChar(255)
+  searchTermType String   @map("搜索词类型") @db.VarChar(80)
+  boardType      String   @map("搜索榜单类型") @db.VarChar(80)
+  dimension      String   @map("统计维度") @db.VarChar(20)
+  createdAt      DateTime @default(now()) @map("收藏时间")
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([userId, searchTerm, categoryName, searchTermType, boardType, dimension])
+  @@index([searchTerm, categoryName, searchTermType, boardType, dimension], map: "搜索词收藏_搜索分组索引")
+  @@map("搜索词收藏表")
 }
 
 model IpWhitelist {

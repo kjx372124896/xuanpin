@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { SearchTrendsService } from "./search-trends.service";
+import { SearchTrendsController } from "./search-trends.controller";
+import { ROLES_KEY } from "../auth/auth.decorators";
 
 type RawQuery = { sql: string; values: unknown[] };
 
@@ -13,6 +15,8 @@ function createPrisma(options: {
   trendRows?: unknown[];
   latestDate?: Date | null;
   queryDelayMs?: number;
+  favoriteRows?: unknown[];
+  teamFavoriteRows?: unknown[];
 } = {}) {
   const calls = {
     aggregate: 0,
@@ -20,8 +24,15 @@ function createPrisma(options: {
     trendFindMany: 0,
     activeRawQueries: 0,
     maxActiveRawQueries: 0,
+    favoriteQueries: [] as any[],
   };
   const prisma = {
+    searchTermFavorite: {
+      findMany: async (query: any) => {
+        calls.favoriteQueries.push(query);
+        return query.where.user ? options.teamFavoriteRows ?? [] : options.favoriteRows ?? [];
+      },
+    },
     searchTermHistory: {
       aggregate: async () => {
         calls.aggregate += 1;
@@ -53,6 +64,109 @@ const filters = {
   page: 1,
   pageSize: 50,
 };
+
+const favoriteIdentity = {
+  searchTerm: "厨房置物架", categoryName: "厨房用品", searchTermType: "核心词", boardType: "搜索热榜", dimension: "日",
+};
+
+function favoriteGroup(identity = favoriteIdentity) {
+  return {
+    ...identity, classificationName: null, latestDate: new Date("2026-10-31T00:00:00Z"), latestRank: 1,
+    latestSearchPeopleRaw: "100", latestSearchPeopleMin: 90, latestSearchPeopleMax: 110, latestSearchPeopleMedian: 100,
+    daysWithData: 1, previousDailyAverage: 50, currentDailyAverage: 100, previousDaysWithData: 1, currentDaysWithData: 1, total: 2n,
+  };
+}
+
+test("搜索词收藏状态限定当前用户及完整分组，同名不同类目不串收藏", async () => {
+  const otherIdentity = { ...favoriteIdentity, categoryName: "收纳用品" };
+  const { prisma, calls } = createPrisma({
+    queryRows: [favoriteGroup(), favoriteGroup(otherIdentity)], favoriteRows: [favoriteIdentity],
+  });
+  const result = await new SearchTrendsService(prisma as never).list(filters, { userId: "member-A" });
+  assert.deepEqual(result.items.map((item) => item.isFavorited), [true, false]);
+  assert.equal(calls.favoriteQueries[0].where.userId, "member-A");
+  assert.deepEqual(calls.favoriteQueries[0].where.OR, [favoriteIdentity, otherIdentity]);
+  assert.equal("favoriteUsers" in result.items[0], false);
+});
+
+test("仅看我的收藏在分页与计数之前按完整分组过滤，账号通过 SQL 参数绑定", async () => {
+  const { prisma, calls } = createPrisma();
+  await new SearchTrendsService(prisma as never).list({ ...filters, favoritesOnly: "true" }, { userId: "member-A" });
+  const query = calls.rawQueries[0];
+  assert.match(query.sql, /EXISTS\s*\(/);
+  for (const field of ["搜索词", "类目", "搜索词类型", "搜索榜单类型", "统计维度"]) {
+    assert.ok(query.sql.includes(`favorite."${field}" = latest."${field}"`));
+  }
+  assert.ok(query.values.includes("member-A"));
+  assert.ok(query.sql.indexOf("EXISTS") < query.sql.indexOf("COUNT(*)::bigint"));
+  assert.equal(query.sql.includes("member-A"), false);
+  assert.equal(calls.favoriteQueries.length, 0);
+});
+
+test("管理员成员收藏保留自己的收藏状态并返回成员信息，成员关键词同步用于列表和成员明细", async () => {
+  const user = { id: "member-B", name: "张三", username: "zhang", department: "选品部" };
+  const createdAt = new Date("2026-11-24T08:00:00Z");
+  const { prisma, calls } = createPrisma({
+    queryRows: [favoriteGroup()], favoriteRows: [favoriteIdentity], teamFavoriteRows: [{ ...favoriteIdentity, user, createdAt }],
+  });
+  const result = await new SearchTrendsService(prisma as never).list({ ...filters, favoritesOnly: true }, {
+    userId: "admin-A", teamFavorites: true, memberKeyword: " 张三 ",
+  });
+  assert.equal(result.items[0].isFavorited, true);
+  assert.equal(result.items[0].favoriteCount, 1);
+  assert.deepEqual(result.items[0].favoriteUsers, [{ userId: user.id, name: user.name, username: user.username, department: user.department, favoritedAt: createdAt.toISOString() }]);
+  assert.ok(calls.rawQueries[0].values.includes("%张三%"));
+  assert.match(calls.rawQueries[0].sql, /用户角色" = 'EMPLOYEE'/);
+  assert.equal(calls.favoriteQueries[0].where.userId, "admin-A");
+  assert.deepEqual(calls.favoriteQueries[1].where.user.AND[0], { OR: [{ role: "EMPLOYEE" }, { id: "admin-A" }] });
+  assert.equal(calls.favoriteQueries[1].where.user.AND[1].OR[0].name.contains, "张三");
+});
+
+test("收藏和取消收藏幂等且只操作当前账号，不接受请求体伪造的用户ID", async () => {
+  const upserts: any[] = [];
+  const deletes: any[] = [];
+  const prisma = {
+    searchTermHistory: { findFirst: async () => ({ id: "history-A" }) },
+    searchTermFavorite: {
+      upsert: async (args: unknown) => { upserts.push(args); },
+      deleteMany: async (args: unknown) => { deletes.push(args); },
+    },
+  };
+  const service = new SearchTrendsService(prisma as never);
+  for (let i = 0; i < 2; i += 1) {
+    assert.equal((await service.favorite("member-A", { ...favoriteIdentity, userId: "member-B" })).isFavorited, true);
+    assert.equal((await service.unfavorite("member-A", { ...favoriteIdentity, userId: "member-B" })).isFavorited, false);
+  }
+  assert.deepEqual(upserts[0], {
+    where: { userId_searchTerm_categoryName_searchTermType_boardType_dimension: { userId: "member-A", ...favoriteIdentity } },
+    create: { userId: "member-A", ...favoriteIdentity }, update: {},
+  });
+  assert.deepEqual(upserts[0], upserts[1]);
+  assert.deepEqual(deletes[0], { where: { userId: "member-A", ...favoriteIdentity } });
+});
+
+test("无效收藏参数及不存在的搜索词不会写入收藏", async () => {
+  let writes = 0;
+  const service = new SearchTrendsService({
+    searchTermHistory: { findFirst: async () => null },
+    searchTermFavorite: { upsert: async () => { writes += 1; } },
+  } as never);
+  for (const body of [null, [], {}, { ...favoriteIdentity, dimension: "周" }, { ...favoriteIdentity, searchTerm: "x".repeat(501) }]) {
+    await assert.rejects(service.favorite("member-A", body), /搜索词收藏参数无效|仅支持收藏日搜索趋势/);
+  }
+  await assert.rejects(service.favorite("member-A", favoriteIdentity), /搜索词不存在/);
+  await assert.rejects(service.list({ ...filters, favoritesOnly: true }), /缺少当前用户/);
+  assert.equal(writes, 0);
+});
+
+test("成员收藏接口只允许管理员，查询上下文始终来自登录用户", () => {
+  assert.deepEqual(Reflect.getMetadata(ROLES_KEY, SearchTrendsController.prototype.teamFavorites), ["ADMIN", "SUPER_ADMIN"]);
+  const contexts: unknown[] = [];
+  const controller = new SearchTrendsController({ list: (_query: unknown, viewer: unknown) => contexts.push(viewer) } as never);
+  const request = { user: { id: "member-A" } } as never;
+  controller.list({ userId: "admin-B", teamFavorites: "true" }, request);
+  assert.deepEqual(contexts[0], { userId: "member-A" });
+});
 
 test("显式日期跳过最新日期聚合，COUNT 与分页合并为一次 SQL", async () => {
   const queryGroup = {

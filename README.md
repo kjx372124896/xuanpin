@@ -2,7 +2,7 @@
 
 公司内部使用的商品榜单导入与选品分析网页工具。前后端均使用 TypeScript，数据存储在 PostgreSQL；本地开发，生产环境推荐使用 Linux 原生一键部署（Node.js + systemd + Nginx），无需 Docker。
 
-**当前版本：v0.5.8**
+**当前版本：v0.5.9**
 
 ## 当前功能
 
