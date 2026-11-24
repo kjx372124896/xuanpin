@@ -13,6 +13,7 @@ import { productMetadataQuery } from "./product-metadata";
 import { BoundedWorkQueue } from "../common/bounded-work-queue";
 import { parseWorkbookFile } from "./workbook-worker";
 import { MAX_BATCH_ROWS } from "./workbook-limits";
+import { normalizeImportFilename } from "./import-filename";
 
 type UploadedFile = Express.Multer.File;
 type RowWithFile = { row: ParsedImportRow; fileId: string; fileName: string };
@@ -141,8 +142,9 @@ export class ImportsService implements OnModuleInit, OnModuleDestroy {
 
   async createPreview(files: UploadedFile[], operatorId: string, importKind: ImportKind = ImportKind.PRODUCT_BOARD) {
     return this.previewQueue.run(async () => {
-      if (importKind === ImportKind.SEARCH_BOARD) return this.createSearchPreview(files, operatorId);
-      return this.createProductPreview(files, operatorId);
+      const normalizedFiles = files.map((file) => ({ ...file, originalname: normalizeImportFilename(file.originalname) }));
+      if (importKind === ImportKind.SEARCH_BOARD) return this.createSearchPreview(normalizedFiles, operatorId);
+      return this.createProductPreview(normalizedFiles, operatorId);
     });
   }
 
@@ -365,17 +367,21 @@ export class ImportsService implements OnModuleInit, OnModuleDestroy {
   }
 
   async listBatches(importKind?: ImportKind) {
-    return this.prisma.importBatch.findMany({
+    const batches = await this.prisma.importBatch.findMany({
       where: importKind ? { importKind } : undefined,
       take: 50, orderBy: { createdAt: "desc" },
       include: { files: { select: { id: true, originalName: true, boardType: true, weekStart: true, weekEnd: true, periodStart: true, periodEnd: true, categoryName: true, searchCategoryName: true, searchTermType: true, searchBoardType: true, dimension: true, rowCount: true, importedCount: true, errorCount: true, status: true } } },
     });
+    return batches.map((batch) => ({
+      ...batch,
+      files: batch.files.map((file) => ({ ...file, originalName: normalizeImportFilename(file.originalName) })),
+    }));
   }
 
   async getBatch(batchId: string) {
     const batch = await this.prisma.importBatch.findUnique({ where: { id: batchId }, include: { files: true } });
     if (!batch) throw new NotFoundException("导入批次不存在。");
-    return { ...batch, files: batch.files.map((file) => ({ ...file, fileSize: file.fileSize.toString() })) };
+    return { ...batch, files: batch.files.map((file) => ({ ...file, originalName: normalizeImportFilename(file.originalName), fileSize: file.fileSize.toString() })) };
   }
 
   private async processSearchBatch(batch: Prisma.ImportBatchGetPayload<{ include: { files: true } }>) {
@@ -399,7 +405,7 @@ export class ImportsService implements OnModuleInit, OnModuleDestroy {
       errorRows += parsed.errors.length;
       fileValidCounts.set(file.id, parsed.rows.length);
       if (allRows.length + parsed.rows.length > MAX_BATCH_ROWS) throw new Error("单批不能超过25万行，请分批上传。");
-      for (const row of parsed.rows) allRows.push({ row, fileId: file.id, fileName: file.originalName });
+      for (const row of parsed.rows) allRows.push({ row, fileId: file.id, fileName: normalizeImportFilename(file.originalName) });
     }
 
     if (allRows.length) {
@@ -504,7 +510,7 @@ export class ImportsService implements OnModuleInit, OnModuleDestroy {
         errorRows += fileErrorCount;
         duplicateRows += storedDuplicateRows;
         if (allRows.length + rows.length > MAX_BATCH_ROWS) throw new Error("单批不能超过25万行，请分批上传。");
-        for (const row of rows) allRows.push({ row, fileId: file.id, fileName: file.originalName });
+        for (const row of rows) allRows.push({ row, fileId: file.id, fileName: normalizeImportFilename(file.originalName) });
       }
 
       // Sidecar rows are already deduplicated in preview. This second pass only
