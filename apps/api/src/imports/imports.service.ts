@@ -5,7 +5,7 @@ import { readFile, writeFile } from "node:fs/promises";
 import { PrismaService } from "../prisma/prisma.service";
 import { parseImportWorkbook, type ParsedImportRow } from "./import-parser";
 import { parseSearchImportWorkbook, type ParsedSearchImportRow } from "./search-import-parser";
-import { NO_SECOND_LEVEL_CATEGORY } from "./metric-parser";
+import { buildCategoryRegistryRows } from "./category-registry";
 import { deduplicateProductImportRows, productImportBusinessKey } from "./product-import-dedup";
 import { calculateListingDate } from "../products/listing-date";
 
@@ -15,14 +15,6 @@ type SearchRowWithFile = { row: ParsedSearchImportRow; fileId: string; fileName:
 
 function sha256(buffer: Buffer) { return createHash("sha256").update(buffer).digest("hex"); }
 function dayKey(date: Date) { return date.toISOString().slice(0, 10); }
-function categoryRegistryName(level1: string, level2: string) {
-  const suffix = ` / ${level2}`;
-  const fullName = `${level1}${suffix}`;
-  if (Array.from(fullName).length <= 255) return fullName;
-  const digest = createHash("md5").update(level1).digest("hex").slice(0, 8);
-  const marker = `~${digest}${suffix}`;
-  return `${Array.from(level1).slice(0, 255 - Array.from(marker).length).join("")}${marker}`;
-}
 function historyData(item: RowWithFile): Prisma.ProductHistoryCreateManyInput {
   const { row, fileId, fileName } = item;
   return {
@@ -357,6 +349,13 @@ export class ImportsService implements OnModuleInit {
       for (const row of parsed.rows) allRows.push({ row, fileId: file.id, fileName: file.originalName });
     }
 
+    if (allRows.length) {
+      await this.prisma.category.createMany({
+        data: buildCategoryRegistryRows(allRows.map(({ row }) => row)),
+        skipDuplicates: true,
+      });
+    }
+
     const existingMap = new Map<string, { id: string; exportTime: Date | null }>();
     if (allRows.length) {
       const terms = [...new Set(allRows.map((item) => item.row.searchTerm))];
@@ -590,27 +589,9 @@ export class ImportsService implements OnModuleInit {
             AND (p."最近上榜日期" IS NULL OR v."周开始日期" >= p."最近上榜日期")
         `);
 
-        const categoryByKey = new Map<string, Prisma.CategoryCreateManyInput>();
-        for (const { row } of allRows) {
-          const parentKey = `parent\u0000${row.categoryLevel1}`;
-          if (!categoryByKey.has(parentKey)) {
-            categoryByKey.set(parentKey, {
-              categoryName: row.categoryLevel1,
-              categoryLevel1: row.categoryLevel1,
-              categoryLevel2: null,
-            });
-          }
-          const childKey = `child\u0000${row.categoryLevel1}\u0000${row.categoryLevel2}`;
-          categoryByKey.set(childKey, {
-            categoryName: row.categoryLevel2 === NO_SECOND_LEVEL_CATEGORY
-              ? categoryRegistryName(row.categoryLevel1, row.categoryLevel2)
-              : row.categoryName,
-            categoryLevel1: row.categoryLevel1,
-            categoryLevel2: row.categoryLevel2,
-          });
-        }
+        const categoryData = buildCategoryRegistryRows(allRows.map(({ row }) => row));
         const categoryNames = [...new Set(allRows.map(({ row }) => row.categoryName))];
-        await this.prisma.category.createMany({ data: [...categoryByKey.values()], skipDuplicates: true });
+        await this.prisma.category.createMany({ data: categoryData, skipDuplicates: true });
 
         const starts = [...new Map(allRows.map((item) => [dayKey(item.row.weekStart), item.row.weekStart])).values()];
         const existing = await this.prisma.productHistory.findMany({

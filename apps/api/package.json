@@ -1,6 +1,6 @@
 {
   "name": "@selection/api",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "private": true,
   "scripts": {
     "dev": "ts-node-dev --respawn --transpile-only --exit-child src/main.ts",
@@ -9,7 +9,7 @@
     "typecheck": "tsc -p tsconfig.build.json --noEmit",
     "seed": "tsx src/seed.ts",
     "device:reset": "tsx src/reset-device-binding.ts",
-    "test": "tsx --test src/imports/metric-parser.test.ts src/imports/product-import-dedup.test.ts src/imports/search-import-parser.test.ts src/search-trends/search-trends.helpers.test.ts src/search-trends/search-trends.service.test.ts src/products/ai-metrics-parser.test.ts src/products/ai-metrics-status.test.ts src/products/consecutive-week-filter.test.ts src/products/listing-date.test.ts src/products/products.service.test.ts src/dmp/dmp.helpers.test.ts src/auth/client-ip.test.ts src/auth/device-info.test.ts src/auth/auth.service.test.ts src/auth/auth.guard.test.ts src/categories/categories.service.test.ts"
+    "test": "tsx --test src/imports/metric-parser.test.ts src/imports/product-import-dedup.test.ts src/imports/category-registry.test.ts src/imports/search-import-parser.test.ts src/search-trends/search-trends.helpers.test.ts src/search-trends/search-trends.service.test.ts src/products/ai-metrics-parser.test.ts src/products/ai-metrics-status.test.ts src/products/consecutive-week-filter.test.ts src/products/listing-date.test.ts src/products/products.service.test.ts src/dmp/dmp.helpers.test.ts src/auth/client-ip.test.ts src/auth/device-info.test.ts src/auth/auth.service.test.ts src/auth/auth.guard.test.ts src/categories/categories.service.test.ts"
   },
   "dependencies": {
     "@nestjs/common": "11.2.9",

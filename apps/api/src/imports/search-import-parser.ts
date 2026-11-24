@@ -4,11 +4,13 @@ import {
   normalizeHeader,
   readWorkbookBuffer,
 } from "./import-parser";
-import { parseExportTime, parseMetric, parseWeekPeriod } from "./metric-parser";
+import { parseCategoryName, parseExportTime, parseMetric, parseWeekPeriod } from "./metric-parser";
 
 export interface ParsedSearchImportRow {
   searchTerm: string;
   categoryName: string;
+  categoryLevel1: string;
+  categoryLevel2: string;
   classificationName: string | null;
   searchTermType: string;
   boardType: string;
@@ -100,6 +102,7 @@ export async function parseSearchImportWorkbook(filePath: string): Promise<Searc
     const searchTerm = cellText(read(row, "搜索词"));
     const periodRaw = cellText(read(row, "日期范围"));
     const categoryName = cellText(read(row, "类目"));
+    const category = parseCategoryName(categoryName);
     const termType = cellText(read(row, "搜索词类型"));
     const boardType = cellText(read(row, "榜单类型"));
     const dimensionRaw = cellText(read(row, "维度"));
@@ -113,7 +116,7 @@ export async function parseSearchImportWorkbook(filePath: string): Promise<Searc
     if (!period) problems.push("日期范围格式错误：" + (periodRaw || "空值"));
     else if (dateKey(period.start) !== dateKey(period.end)) problems.push("日维度数据的日期范围必须是同一天");
     if (dimensionRaw !== "日") problems.push("暂不支持「" + (dimensionRaw || "空") + "」维度，仅支持日维度");
-    if (!categoryName) problems.push("类目为空");
+    if (!category) problems.push("类目为空或一级类目无法识别");
     if (!termType) problems.push("搜索词类型为空");
     if (!boardType) problems.push("榜单类型为空");
 
@@ -133,7 +136,9 @@ export async function parseSearchImportWorkbook(filePath: string): Promise<Searc
 
     rows.push({
       searchTerm,
-      categoryName,
+      categoryName: category!.raw,
+      categoryLevel1: category!.level1,
+      categoryLevel2: category!.level2,
       classificationName: cellText(read(row, "分类名称")) || null,
       searchTermType: termType,
       boardType,
