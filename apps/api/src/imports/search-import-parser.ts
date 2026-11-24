@@ -5,6 +5,7 @@ import {
   readWorkbookBuffer,
 } from "./import-parser";
 import { parseCategoryName, parseExportTime, parseMetric, parseWeekPeriod } from "./metric-parser";
+import { assertWorkbookLimits } from "./workbook-limits";
 
 export interface ParsedSearchImportRow {
   searchTerm: string;
@@ -68,6 +69,7 @@ function dateKey(value: Date) {
 export async function parseSearchImportWorkbook(filePath: string): Promise<SearchImportParseResult> {
   const workbook = new ExcelJS.Workbook();
   await workbook.xlsx.load((await readWorkbookBuffer(filePath)) as any);
+  assertWorkbookLimits(workbook);
   const worksheet = findSearchWorksheet(workbook);
   if (!worksheet) {
     throw new Error("没有找到有效的搜索榜单工作表，必须包含：" + REQUIRED_HEADERS.join("、") + "。");

@@ -46,24 +46,42 @@ export class AdminService {
     employmentStatus?: "ACTIVE" | "RESIGNED" | "SUSPENDED";
     accountStatus?: "ACTIVE" | "DISABLED"; canImport?: boolean;
   }) {
-    const target = await this.prisma.user.findUnique({ where: { id } });
-    if (!target) throw new NotFoundException("员工账号不存在。");
-    if (actor.role !== "SUPER_ADMIN" && target.role !== "EMPLOYEE") throw new ForbiddenException("普通管理员只能管理普通员工账号。");
-    if (actor.role !== "SUPER_ADMIN" && input.role && input.role !== "EMPLOYEE") throw new ForbiddenException("只有超级管理员可以设置管理员角色。");
-    if (actor.id === id && input.role && input.role !== actor.role) throw new BadRequestException("不能在当前登录账号中修改自己的角色。");
-    const data: Record<string, unknown> = { ...input };
-    if (input.role && input.role !== "EMPLOYEE") data.canImport = true;
-    const user = await this.prisma.user.update({
-      where: { id }, data,
-      select: {
-        id: true, username: true, name: true, employeeNo: true, department: true, role: true,
-        employmentStatus: true, accountStatus: true, canImport: true, createdAt: true, updatedAt: true,
-      },
+    return this.prisma.$transaction(async (tx) => {
+      // Serialize role/status changes across API instances before checking the
+      // last active super administrator. The next statement sees the latest data.
+      await tx.$queryRaw`SELECT 1 FROM pg_advisory_xact_lock(73024118)`;
+      const currentActor = await tx.user.findUnique({ where: { id: actor.id }, select: { role: true, accountStatus: true, employmentStatus: true } });
+      if (!currentActor || !["SUPER_ADMIN", "ADMIN"].includes(currentActor.role) || currentActor.accountStatus !== "ACTIVE" || currentActor.employmentStatus !== "ACTIVE") {
+        throw new ForbiddenException("当前账号的管理员权限已失效，请重新登录。");
+      }
+      const target = await tx.user.findUnique({ where: { id } });
+      if (!target) throw new NotFoundException("员工账号不存在。");
+      if (currentActor.role !== "SUPER_ADMIN" && target.role !== "EMPLOYEE") throw new ForbiddenException("普通管理员只能管理普通员工账号。");
+      if (currentActor.role !== "SUPER_ADMIN" && input.role && input.role !== "EMPLOYEE") throw new ForbiddenException("只有超级管理员可以设置管理员角色。");
+      if (actor.id === id && input.role && input.role !== actor.role) throw new BadRequestException("不能在当前登录账号中修改自己的角色。");
+      if (actor.id === id && (input.accountStatus === "DISABLED" || input.employmentStatus && input.employmentStatus !== "ACTIVE")) {
+        throw new BadRequestException("不能停用当前登录账号或将自己设为离职，请由其他管理员处理。");
+      }
+      const removesActiveSuperAdmin = target.role === "SUPER_ADMIN" && target.accountStatus === "ACTIVE" && target.employmentStatus === "ACTIVE"
+        && (input.role && input.role !== "SUPER_ADMIN" || input.accountStatus === "DISABLED" || input.employmentStatus && input.employmentStatus !== "ACTIVE");
+      if (removesActiveSuperAdmin) {
+        const others = await tx.user.count({ where: { id: { not: id }, role: "SUPER_ADMIN", accountStatus: "ACTIVE", employmentStatus: "ACTIVE" } });
+        if (!others) throw new BadRequestException("系统必须保留至少一个正常在职的超级管理员。");
+      }
+      const data: Record<string, unknown> = { ...input };
+      if (input.role && input.role !== "EMPLOYEE") data.canImport = true;
+      const user = await tx.user.update({
+        where: { id }, data,
+        select: {
+          id: true, username: true, name: true, employeeNo: true, department: true, role: true,
+          employmentStatus: true, accountStatus: true, canImport: true, createdAt: true, updatedAt: true,
+        },
+      });
+      if (input.employmentStatus && input.employmentStatus !== "ACTIVE" || input.accountStatus === "DISABLED") {
+        await tx.loginSession.deleteMany({ where: { userId: id } });
+      }
+      return user;
     });
-    if (input.employmentStatus && input.employmentStatus !== "ACTIVE" || input.accountStatus === "DISABLED") {
-      await this.prisma.loginSession.deleteMany({ where: { userId: id } });
-    }
-    return user;
   }
 
   async resetPassword(actor: RequestUser, id: string, password: string) {

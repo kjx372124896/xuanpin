@@ -1,6 +1,6 @@
 {
   "name": "selection-tool",
-  "version": "0.5.1",
+  "version": "0.5.5",
   "private": true,
   "packageManager": "pnpm@10.34.9",
   "scripts": {
@@ -17,7 +17,8 @@
     "db:studio": "pnpm exec prisma studio --schema prisma/schema.prisma",
     "test:parser": "pnpm --filter @selection/api test",
     "deploy:linux": "node scripts/deploy-linux.mjs",
-    "update:linux": "node scripts/deploy-linux.mjs --update"
+    "update:linux": "node scripts/deploy-linux.mjs --update",
+    "test": "pnpm -r --if-present test"
   },
   "devDependencies": {
     "@prisma/client": "6.19.3",
@@ -27,6 +28,11 @@
     "typescript": "^5.9.3"
   },
   "pnpm": {
-    "onlyBuiltDependencies": ["@prisma/client", "@prisma/engines", "prisma", "esbuild"]
+    "onlyBuiltDependencies": [
+      "@prisma/client",
+      "@prisma/engines",
+      "prisma",
+      "esbuild"
+    ]
   }
 }

@@ -106,7 +106,7 @@ test("类目登记表返回12周进度，并让二级类目继承一级负责人
   });
 });
 
-test("搜索词榜单按每周7天覆盖检查完整性，并在二级类目无数据时继承一级类目数据", async () => {
+test("搜索词榜单按层级独立统计7天覆盖，一级类目数据只计入无二级类目", async () => {
   const prisma = {
     category: {
       findMany: async () => [
@@ -127,6 +127,11 @@ test("搜索词榜单按每周7天覆盖检查完整性，并在二级类目无�
           responsibleUser: null,
         },
         {
+          id: "child-unclassified", categoryName: "家居收纳 / 无二级类目",
+          categoryLevel1: "家居收纳", categoryLevel2: "无二级类目",
+          responsibleUserId: null, responsibleUser: null,
+        },
+        {
           id: "child-2",
           categoryName: "家居收纳 / 调料收纳",
           categoryLevel1: "家居收纳",
@@ -142,12 +147,12 @@ test("搜索词榜单按每周7天覆盖检查完整性，并在二级类目无�
     searchTermHistory: {
       groupBy: async (args: { where: { searchDate: { gte: Date; lte: Date } } }) => {
         const latestWeekStart = new Date(args.where.searchDate.lte.getTime() - 6 * 24 * 60 * 60 * 1000);
-        const rows: Array<{ categoryName: string; searchDate: Date; _count: { _all: number } }> = [];
+        const rows: Array<{ categoryLevel1: string; categoryLevel2: string; searchDate: Date; _count: { _all: number } }> = [];
         for (let day = 0; day < 7; day += 1) {
           const searchDate = new Date(latestWeekStart.getTime() + day * 24 * 60 * 60 * 1000);
-          rows.push({ categoryName: "家居收纳", searchDate, _count: { _all: 5 } });
+          rows.push({ categoryLevel1: "家居收纳", categoryLevel2: "无二级类目", searchDate, _count: { _all: 5 } });
           if (day < 2) {
-            rows.push({ categoryName: "家居收纳/厨房置物架", searchDate, _count: { _all: 3 } });
+            rows.push({ categoryLevel1: "家居收纳", categoryLevel2: "厨房置物架", searchDate, _count: { _all: 3 } });
           }
         }
         return rows;
@@ -166,14 +171,16 @@ test("搜索词榜单按每周7天覆盖检查完整性，并在二级类目无�
   assert.ok(inheritedChild);
 
   assert.equal(directChild.weekCounts[11].daysWithData, 2);
-  assert.equal(directChild.weekCounts[11].inheritedFromParent, false);
-  assert.equal(inheritedChild.weekCounts[11].daysWithData, 7);
-  assert.equal(inheritedChild.weekCounts[11].recordCount, 35);
-  assert.equal(inheritedChild.weekCounts[11].inheritedFromParent, true);
+  assert.equal(inheritedChild.weekCounts[11].daysWithData, 0);
+  assert.equal(inheritedChild.weekCounts[11].recordCount, 0);
+  const unclassified = parent.children.find((item) => item.categoryLevel2 === "无二级类目")!;
+  assert.equal(unclassified.weekCounts[11].daysWithData, 7);
+  assert.equal(unclassified.weekCounts[11].recordCount, 35);
+  assert.equal(unclassified.ownerUserId, "employee-1");
   assert.deepEqual(parent.weekProgress[11], {
     weekStart: result.periods[11].weekStart,
     imported: 1,
-    total: 2,
+    total: 3,
     partial: 1,
     recordCount: 41,
   });

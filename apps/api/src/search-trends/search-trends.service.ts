@@ -7,6 +7,8 @@ type SearchTrendFilters = {
   startDate?: string;
   endDate?: string;
   category?: string | string[];
+  categoryLevel1?: string | string[];
+  categoryLevel2?: string | string[];
   searchTermType?: string | string[];
   boardType?: string | string[];
   keyword?: string;
@@ -47,6 +49,7 @@ type SearchGroupQueryRow = Omit<SearchGroupRow, "searchTerm"> & {
 
 type SearchTrendOptionsResult = {
   categories: string[];
+  categoryLevels: Array<{ categoryLevel1: string; categoryLevel2: string }>;
   searchTermTypes: string[];
   boardTypes: string[];
   latestDate: string | null;
@@ -159,13 +162,20 @@ export class SearchTrendsService {
 
     const request = (async (): Promise<SearchTrendOptionsResult> => {
       const [categories, termTypes, boardTypes, latest] = await Promise.all([
-        this.prisma.searchTermHistory.findMany({ distinct: ["categoryName"], select: { categoryName: true }, orderBy: { categoryName: "asc" } }),
+        this.prisma.searchTermHistory.findMany({
+          distinct: ["categoryName", "categoryLevel1", "categoryLevel2"],
+          select: { categoryName: true, categoryLevel1: true, categoryLevel2: true },
+          orderBy: [{ categoryLevel1: "asc" }, { categoryLevel2: "asc" }, { categoryName: "asc" }],
+        }),
         this.prisma.searchTermHistory.findMany({ distinct: ["searchTermType"], select: { searchTermType: true }, orderBy: { searchTermType: "asc" } }),
         this.prisma.searchTermHistory.findMany({ distinct: ["boardType"], select: { boardType: true }, orderBy: { boardType: "asc" } }),
         this.prisma.searchTermHistory.aggregate({ _max: { searchDate: true } }),
       ]);
       const value = {
         categories: categories.map((item) => item.categoryName),
+        categoryLevels: [...new Map(categories.map(({ categoryLevel1, categoryLevel2 }) => [
+          JSON.stringify([categoryLevel1, categoryLevel2]), { categoryLevel1, categoryLevel2 },
+        ])).values()],
         searchTermTypes: termTypes.map((item) => item.searchTermType),
         boardTypes: boardTypes.map((item) => item.boardType),
         latestDate: latest._max.searchDate ? dateKey(latest._max.searchDate) : null,
@@ -211,6 +221,8 @@ export class SearchTrendsService {
     const previousDays = Math.round((periods.previousEndDate.getTime() - periods.previousStartDate.getTime()) / 86_400_000) + 1;
 
     const categories = parseList(filters.category);
+    const categoryLevel1 = parseList(filters.categoryLevel1);
+    const categoryLevel2 = parseList(filters.categoryLevel2);
     const termTypes = parseList(filters.searchTermType);
     const boardTypes = parseList(filters.boardType);
     const keyword = filters.keyword?.trim();
@@ -221,6 +233,8 @@ export class SearchTrendsService {
 
     const commonConditions: Prisma.Sql[] = [Prisma.sql`"统计维度" = '日'`];
     if (categories.length) commonConditions.push(Prisma.sql`"类目" IN (${Prisma.join(categories)})`);
+    if (categoryLevel1.length) commonConditions.push(Prisma.sql`"一级类目" IN (${Prisma.join(categoryLevel1)})`);
+    if (categoryLevel2.length) commonConditions.push(Prisma.sql`"二级类目" IN (${Prisma.join(categoryLevel2)})`);
     if (termTypes.length) commonConditions.push(Prisma.sql`"搜索词类型" IN (${Prisma.join(termTypes)})`);
     if (boardTypes.length) commonConditions.push(Prisma.sql`"搜索榜单类型" IN (${Prisma.join(boardTypes)})`);
     if (keyword) commonConditions.push(Prisma.sql`"搜索词" ILIKE ${"%" + keyword + "%"}`);
@@ -245,13 +259,14 @@ export class SearchTrendsService {
 
     const sortBy = filters.sortBy === "growthRate" ? "growthRate" : "latestRank";
     const sortOrder = filters.sortOrder === "desc" ? "desc" : "asc";
-    const orderBySql = sortBy === "growthRate"
+    const primaryOrderSql = sortBy === "growthRate"
       ? sortOrder === "asc"
         ? Prisma.sql`"growthRate" ASC NULLS LAST, "搜索词" ASC`
         : Prisma.sql`"growthRate" DESC NULLS LAST, "搜索词" ASC`
       : sortOrder === "asc"
         ? Prisma.sql`"排名" ASC NULLS LAST, "搜索人数中值" DESC NULLS LAST, "搜索词" ASC`
         : Prisma.sql`"排名" DESC NULLS LAST, "搜索人数中值" DESC NULLS LAST, "搜索词" ASC`;
+    const orderBySql = Prisma.sql`${primaryOrderSql}, "类目" ASC, "搜索词类型" ASC, "搜索榜单类型" ASC, "统计维度" ASC`;
 
     const cte = Prisma.sql`
       WITH filtered AS (

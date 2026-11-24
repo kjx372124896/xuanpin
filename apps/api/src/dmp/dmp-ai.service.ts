@@ -104,13 +104,19 @@ export class DmpAiService {
   async recoverRun(userId: string, clientRunId: string) {
     const run = await this.prisma.dmpAiRun.findUnique({ where: { userId_clientRunId: { userId, clientRunId } } });
     if (!run) throw new NotFoundException("没有找到该批 AI 任务。");
-    if (run.markdown) return this.mapRun(run);
+    const productIds = JSON.parse(run.productIdsJson) as string[];
+    const cached = run.markdown ? parseAiMetricsMarkdown(run.markdown, productIds) : null;
+    if (cached && !cached.errors.length && !cached.missingProductIds.length) return this.mapRun(run);
     if (!run.sessionId) return this.mapRun(run);
     const credentials = await this.auth.getCredentials(userId);
     try {
       const history = await this.readSessionHistory(credentials, run.sessionId);
       const markdown = extractDmpAssistantMarkdown(history);
       if (!markdown) return this.mapRun(run);
+      const incoming = parseAiMetricsMarkdown(markdown, productIds);
+      if (cached && (incoming.errors.length > cached.errors.length || incoming.rows.length < cached.rows.length)) {
+        return this.mapRun(run);
+      }
       return this.saveMarkdown(userId, clientRunId, markdown, 0);
     } catch (error) {
       if (error instanceof DmpApiError && error.authFailure) await this.auth.markInvalid(userId, error.message);
@@ -132,8 +138,9 @@ export class DmpAiService {
     }
     const productIds = JSON.parse(run.productIdsJson) as string[];
     const parsed = parseAiMetricsMarkdown(markdown, productIds);
-    const status = parsed.errors.length ? "NEEDS_REVIEW" : "COMPLETED";
-    await this.prisma.dmpAiRun.update({ where: { id: run.id }, data: { status, markdown, errorMessage: parsed.errors.length ? parsed.errors.join("；").slice(0, 500) : null } });
+    const issues = [...parsed.errors, ...(parsed.missingProductIds.length ? [`尚缺少 ${parsed.missingProductIds.length} 件商品，可以重新查询原会话。`] : [])];
+    const status = issues.length ? "NEEDS_REVIEW" : "COMPLETED";
+    await this.prisma.dmpAiRun.update({ where: { id: run.id }, data: { status, markdown, errorMessage: issues.length ? issues.join("；").slice(0, 500) : null } });
     return { ...(await this.getRun(userId, clientRunId)), missingProductIds: parsed.missingProductIds, parseErrors: parsed.errors, payloadCount };
   }
 

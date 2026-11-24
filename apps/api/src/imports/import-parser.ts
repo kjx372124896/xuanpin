@@ -1,7 +1,8 @@
 import ExcelJS from "exceljs";
 import { readFile } from "node:fs/promises";
-import { strFromU8, strToU8, unzipSync, zipSync } from "fflate";
+import { strFromU8, strToU8, zipSync } from "fflate";
 import { parseCategoryName, parseExportTime, parseMetric, parseWeekPeriod } from "./metric-parser";
+import { assertWorkbookLimits, readBoundedArchive } from "./workbook-limits";
 
 export type ImportBoardType = "NEW_PRODUCT_TRAFFIC" | "TRANSACTION_GROWTH";
 
@@ -44,7 +45,7 @@ export interface ImportParseResult {
 
 export async function readWorkbookBuffer(filePath: string) {
   const original = await readFile(filePath);
-  const archive = unzipSync(original);
+  const archive = readBoundedArchive(original);
   for (const name of Object.keys(archive)) {
     if (!/^xl\/worksheets\/_rels\/sheet\d+\.xml\.rels$/.test(name)) continue;
     const xml = strFromU8(archive[name]);
@@ -100,6 +101,7 @@ function findWorksheet(workbook: ExcelJS.Workbook) {
 export async function parseImportWorkbook(filePath: string): Promise<ImportParseResult> {
   const workbook = new ExcelJS.Workbook();
   await workbook.xlsx.load((await readWorkbookBuffer(filePath)) as any);
+  assertWorkbookLimits(workbook);
   const worksheet = findWorksheet(workbook);
   if (!worksheet) throw new Error("没有找到有效的商品榜单工作表。");
 

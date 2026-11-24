@@ -1,13 +1,14 @@
 {
   "name": "@selection/web",
-  "version": "0.5.1",
+  "version": "0.5.5",
   "private": true,
   "type": "module",
   "scripts": {
     "dev": "vite --host 0.0.0.0",
     "build": "tsc -b && vite build",
     "preview": "vite preview --host 0.0.0.0",
-    "typecheck": "tsc -b --pretty false"
+    "typecheck": "tsc -b --pretty false",
+    "test": "tsx --test src/auth/session-cache.test.ts"
   },
   "dependencies": {
     "@ant-design/icons": "^6.3.4",

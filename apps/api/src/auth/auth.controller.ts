@@ -1,6 +1,6 @@
 import { Body, Controller, Get, Param, Post, Req, Res } from "@nestjs/common";
 import type { Request, Response } from "express";
-import { IsString, MinLength } from "class-validator";
+import { IsString, MaxLength, MinLength } from "class-validator";
 import { Public } from "./auth.decorators";
 import { AuthService } from "./auth.service";
 import type { AuthenticatedRequest } from "./request-user";
@@ -9,8 +9,8 @@ import { DEVICE_COOKIE_NAME } from "./device-binding.service";
 import { parseDeviceInfo } from "./device-info";
 
 class LoginDto {
-  @IsString() username!: string;
-  @IsString() @MinLength(1) password!: string;
+  @IsString() @MaxLength(80) username!: string;
+  @IsString() @MinLength(1) @MaxLength(1024) password!: string;
 }
 
 @Controller("auth")

@@ -18,7 +18,6 @@ interface WeekCount {
   count: number;
   daysWithData?: number;
   recordCount?: number;
-  inheritedFromParent?: boolean;
 }
 interface WeekProgress {
   weekStart: string;
@@ -264,7 +263,7 @@ export function CategoriesPage() {
           const partial = progress.partial ?? 0;
           const color = progress.imported === progress.total ? "success" : progress.imported > 0 || partial > 0 ? "warning" : "error";
           return (
-            <Tooltip title={`完整 ${progress.imported}/${progress.total} 个二级类目；部分完成 ${partial} 个；共 ${progress.recordCount} 条搜索记录。二级类目没有独立数据时，会继承一级类目当周数据。`}>
+            <Tooltip title={`完整 ${progress.imported}/${progress.total} 个二级类目；部分完成 ${partial} 个；共 ${progress.recordCount} 条搜索记录。仅一级类目的数据归入“无二级类目”，各二级类目独立统计。`}>
               <Tag color={color}>{progress.imported}/{progress.total}</Tag>
             </Tooltip>
           );
@@ -290,8 +289,7 @@ export function CategoriesPage() {
     if (isSearchTab) {
       const days = week?.daysWithData ?? week?.count ?? 0;
       const color = days === 7 ? "success" : days > 0 ? "warning" : "error";
-      const inherited = week?.inheritedFromParent ? "；使用一级类目数据继承" : "";
-      return <Tooltip title={`该周 ${days}/7 天有搜索词记录，共 ${week?.recordCount ?? 0} 条${inherited}`}><Tag color={color}>{days}/7天{week?.inheritedFromParent ? " · 继承" : ""}</Tag></Tooltip>;
+      return <Tooltip title={`该周 ${days}/7 天有搜索词记录，共 ${week?.recordCount ?? 0} 条`}><Tag color={color}>{days}/7天</Tag></Tooltip>;
     }
     const count = week?.count ?? 0;
     return count > 0

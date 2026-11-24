@@ -66,6 +66,7 @@ interface SearchTrendResult {
 }
 interface SearchTrendOptions {
   categories: string[];
+  categoryLevels: Array<{ categoryLevel1: string; categoryLevel2: string }>;
   searchTermTypes: string[];
   boardTypes: string[];
   latestDate: string | null;
@@ -73,7 +74,8 @@ interface SearchTrendOptions {
 interface SearchFilters {
   startDate?: string;
   endDate?: string;
-  category?: string[];
+  categoryLevel1?: string[];
+  categoryLevel2?: string[];
   searchTermType?: string[];
   boardType?: string[];
   keyword?: string;
@@ -253,6 +255,14 @@ export function SearchTrendsPage() {
     queryKey: ["searchTrendOptions"],
     queryFn: async () => (await api.get<SearchTrendOptions>("/search-trends/options")).data,
   });
+  const categoryOptions = useMemo(() => {
+    const levels = optionsQuery.data?.categoryLevels ?? [];
+    const selectedLevel1 = new Set(draft.categoryLevel1 ?? []);
+    return {
+      level1: [...new Set(levels.map((item) => item.categoryLevel1))],
+      level2: [...new Set(levels.filter((item) => selectedLevel1.has(item.categoryLevel1)).map((item) => item.categoryLevel2))],
+    };
+  }, [optionsQuery.data?.categoryLevels, draft.categoryLevel1]);
 
   useEffect(() => {
     if (optionsQuery.isLoading || initialized) return;
@@ -281,7 +291,8 @@ export function SearchTrendsPage() {
       if (filters.startDate) params.startDate = filters.startDate;
       if (filters.endDate) params.endDate = filters.endDate;
       params.comparisonMode = filters.comparisonMode ?? "previousMonth";
-      if (filters.category?.length) params.category = filters.category.join(",");
+      if (filters.categoryLevel1?.length) params.categoryLevel1 = filters.categoryLevel1.join(",");
+      if (filters.categoryLevel2?.length) params.categoryLevel2 = filters.categoryLevel2.join(",");
       if (filters.searchTermType?.length) params.searchTermType = filters.searchTermType.join(",");
       if (filters.boardType?.length) params.boardType = filters.boardType.join(",");
       if (filters.keyword) params.keyword = filters.keyword;
@@ -453,17 +464,34 @@ export function SearchTrendsPage() {
             />
           </div>
           <div className="filter-field">
-            <label>搜索类目</label>
+            <label htmlFor="search-category-level1">一级类目</label>
             <Select
+              id="search-category-level1"
               mode="multiple"
               allowClear
               showSearch
               optionFilterProp="label"
               maxTagCount="responsive"
-              value={draft.category ?? []}
-              onChange={(value) => setDraft((current) => ({ ...current, category: value }))}
-              placeholder="全部类目"
-              options={(optionsQuery.data?.categories ?? []).map((value) => ({ label: value, value }))}
+              value={draft.categoryLevel1 ?? []}
+              onChange={(value) => setDraft((current) => ({ ...current, categoryLevel1: value, categoryLevel2: [] }))}
+              placeholder="全部一级类目"
+              options={categoryOptions.level1.map((value) => ({ label: value, value }))}
+            />
+          </div>
+          <div className="filter-field">
+            <label htmlFor="search-category-level2">二级类目</label>
+            <Select
+              id="search-category-level2"
+              mode="multiple"
+              allowClear
+              showSearch
+              optionFilterProp="label"
+              maxTagCount="responsive"
+              disabled={!draft.categoryLevel1?.length}
+              value={draft.categoryLevel2 ?? []}
+              onChange={(value) => setDraft((current) => ({ ...current, categoryLevel2: value }))}
+              placeholder={draft.categoryLevel1?.length ? "全部二级类目" : "请先选择一级类目"}
+              options={categoryOptions.level2.map((value) => ({ label: value, value }))}
             />
           </div>
           <div className="filter-field">

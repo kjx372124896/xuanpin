@@ -283,6 +283,8 @@ model SearchTermHistory {
   id                    String      @id @default(cuid()) @map("搜索历史ID") @db.VarChar(30)
   searchTerm            String      @map("搜索词") @db.VarChar(500)
   categoryName          String      @map("类目") @db.VarChar(255)
+  categoryLevel1        String      @map("一级类目") @db.VarChar(255)
+  categoryLevel2        String      @map("二级类目") @db.VarChar(255)
   classificationName    String?     @map("分类名称") @db.VarChar(255)
   searchTermType        String      @map("搜索词类型") @db.VarChar(80)
   boardType             String      @map("搜索榜单类型") @db.VarChar(80)
@@ -307,6 +309,7 @@ model SearchTermHistory {
   @@index([searchTerm, searchDate])
   @@index([searchTermType, boardType, searchDate])
   @@index([searchPeopleMedian])
+  @@index([categoryLevel1, categoryLevel2, searchDate], map: "搜索词日历史_类目层级日期索引")
   @@map("搜索词日历史表")
 }
 

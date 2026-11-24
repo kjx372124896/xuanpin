@@ -152,7 +152,7 @@ test("筛选选项请求并发合并，并在短缓存有效期内复用结果",
       findMany: async (args: { distinct?: string[] }) => {
         optionFindManyCalls += 1;
         const field = args.distinct?.[0];
-        if (field === "categoryName") return [{ categoryName: "厨房用品" }];
+        if (field === "categoryName") return [{ categoryName: "厨房用品", categoryLevel1: "厨房用品", categoryLevel2: "无二级类目" }];
         if (field === "searchTermType") return [{ searchTermType: "核心词" }];
         return [{ boardType: "NEW_PRODUCT_TRAFFIC" }];
       },
@@ -169,6 +169,7 @@ test("筛选选项请求并发合并，并在短缓存有效期内复用结果",
   assert.deepEqual(first, second);
   assert.deepEqual(second, third);
   assert.deepEqual(first.categories, ["厨房用品"]);
+  assert.deepEqual(first.categoryLevels, [{ categoryLevel1: "厨房用品", categoryLevel2: "无二级类目" }]);
   assert.deepEqual(first.searchTermTypes, ["核心词"]);
   assert.deepEqual(first.boardTypes, ["NEW_PRODUCT_TRAFFIC"]);
   assert.equal(first.latestDate, "2026-10-31");

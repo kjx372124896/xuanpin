@@ -111,10 +111,6 @@ export class DmpJobsService implements OnModuleInit, OnModuleDestroy {
     if (!run?.sessionId) {
       throw new BadRequestException("这一批没有可查询的达摩盘会话。若任务已明确失败，请使用「重试」创建新的批次尝试。");
     }
-    if (run.markdown) {
-      await this.importBatchResult(batch, run.markdown);
-      return this.getTask(taskId);
-    }
     await this.prisma.dmpCollectionBatch.update({
       where: { id: batch.id },
       data: { status: "RECOVERING", recoveryCount: 0, nextAttemptAt: new Date(), lastError: null, completedAt: null },
@@ -196,7 +192,7 @@ export class DmpJobsService implements OnModuleInit, OnModuleDestroy {
         completedAt: batch.completedAt?.toISOString() ?? null,
         updatedAt: batch.updatedAt.toISOString(),
         canRetry: ["FAILED", "NEEDS_REVIEW", "PARTIAL"].includes(batch.status),
-        canRecover: ["RECOVERING", "NEEDS_REVIEW"].includes(batch.status),
+        canRecover: ["RECOVERING", "NEEDS_REVIEW", "PARTIAL"].includes(batch.status),
       })),
     };
   }
@@ -338,11 +334,6 @@ export class DmpJobsService implements OnModuleInit, OnModuleDestroy {
       await this.refreshTask(batch.taskId);
       return;
     }
-    if (run.markdown) {
-      await this.importBatchResult(batch, run.markdown);
-      return;
-    }
-
     const recovered = await this.ai.recoverRun(batch.task.createdById, batch.clientRunId);
     if (recovered.markdown) {
       await this.importBatchResult(batch, recovered.markdown);

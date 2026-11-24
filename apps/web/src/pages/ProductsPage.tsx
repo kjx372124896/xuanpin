@@ -199,13 +199,14 @@ export function ProductsPage() {
     latestWeekStarts: filters.latestWeekStarts?.join(",") || undefined,
   }), [page, pageSize, cursor, boardType, filters]);
   const productsQuery = useQuery({
-    queryKey: ["products", "board-v1", boardType, params],
-    queryFn: async () => (await api.get<Paginated<ProductListItem>>("/products", { params })).data,
+    queryKey: ["products", "board-v1", user?.id, boardType, params],
+    queryFn: async ({ signal }) => (await api.get<Paginated<ProductListItem>>("/products", { params, signal })).data,
+    enabled: !(isAdmin && teamFavoritesMode),
   });
   const teamParams = useMemo(() => ({ ...params, favoritesOnly: undefined, memberKeyword: memberKeyword.trim() || undefined }), [params, memberKeyword]);
   const teamFavoritesQuery = useQuery({
-    queryKey: ["team-favorites", "board-v1", boardType, teamParams],
-    queryFn: async () => (await api.get<Paginated<TeamFavoriteProduct>>("/products/team-favorites", { params: teamParams })).data,
+    queryKey: ["team-favorites", "board-v1", user?.id, boardType, teamParams],
+    queryFn: async ({ signal }) => (await api.get<Paginated<TeamFavoriteProduct>>("/products/team-favorites", { params: teamParams, signal })).data,
     enabled: isAdmin && teamFavoritesMode,
   });
   const categoriesQuery = useQuery({

@@ -27,6 +27,8 @@ interface SearchMetric { raw: string | null; min: number | null; max: number | n
 interface SearchPreviewRow {
   searchTerm: string;
   categoryName: string;
+  categoryLevel1: string;
+  categoryLevel2: string;
   classificationName: string | null;
   searchTermType: string;
   boardType: string;
@@ -122,6 +124,8 @@ export function SearchImportPanel() {
       void queryClient.invalidateQueries({ queryKey: ["imports", "SEARCH_BOARD"] });
       void queryClient.invalidateQueries({ queryKey: ["searchTrends"] });
       void queryClient.invalidateQueries({ queryKey: ["searchTrendOptions"] });
+      void queryClient.invalidateQueries({ queryKey: ["categoriesSearchOverview"] });
+      void queryClient.invalidateQueries({ queryKey: ["categoriesOverview"] });
     }
   }, [batchQuery.data?.status, queryClient]);
 
@@ -187,7 +191,9 @@ export function SearchImportPanel() {
   ];
   const previewColumns = [
     { title: "搜索词", dataIndex: "searchTerm", key: "term", width: 160 },
-    { title: "类目", dataIndex: "categoryName", key: "category", width: 130 },
+    { title: "原始类目", dataIndex: "categoryName", key: "category", width: 180 },
+    { title: "一级类目", dataIndex: "categoryLevel1", key: "categoryLevel1", width: 130 },
+    { title: "二级类目", dataIndex: "categoryLevel2", key: "categoryLevel2", width: 150 },
     { title: "搜索词类型", dataIndex: "searchTermType", key: "termType", width: 100 },
     { title: "榜单类型", dataIndex: "boardType", key: "boardType", width: 100 },
     { title: "日期", dataIndex: "searchDate", key: "date", width: 110 },
