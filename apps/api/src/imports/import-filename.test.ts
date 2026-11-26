@@ -5,13 +5,59 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { ImportKind, type Prisma } from "@prisma/client";
+import { INTERCEPTORS_METADATA } from "@nestjs/common/constants";
+import { lastValueFrom, of } from "rxjs";
 import ExcelJS from "exceljs";
 import express from "express";
 import multer from "multer";
 import { normalizeImportFilename } from "./import-filename";
 import { ImportsService } from "./imports.service";
+import { ImportsController } from "./imports.controller";
 
 const misdecode = (name: string) => Buffer.from(name, "utf8").toString("latin1");
+
+test("真实导入上传拦截器允许400份Excel，并拒绝第401份", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "selection-upload-count-"));
+  const previousUploadDir = process.env.UPLOAD_DIR;
+  process.env.UPLOAD_DIR = directory;
+  const [UploadInterceptor] = Reflect.getMetadata(INTERCEPTORS_METADATA, ImportsController.prototype.preview);
+  const interceptor = new UploadInterceptor();
+  const app = express();
+  app.post("/preview", async (req, res, next) => {
+    try {
+      const result = await interceptor.intercept({
+        switchToHttp: () => ({ getRequest: () => req, getResponse: () => res }),
+      }, { handle: () => of({ files: (req.files as Express.Multer.File[]).length }) });
+      res.json(await lastValueFrom(result));
+    } catch (error) { next(error); }
+  });
+  app.use((error: { getStatus?: () => number; message: string }, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+    res.status(error.getStatus?.() ?? 500).json({ message: error.message });
+  });
+  const server = app.listen(0, "127.0.0.1");
+  try {
+    await once(server, "listening");
+    const address = server.address();
+    assert.ok(address && typeof address !== "string");
+    for (const count of [400, 401]) {
+      const form = new FormData();
+      for (let index = 0; index < count; index += 1) {
+        form.append("files", new Blob(["upload-limit-fixture"]), `fixture-${index}.xlsx`);
+      }
+      const response: Awaited<ReturnType<typeof fetch>> = await fetch(`http://127.0.0.1:${address.port}/preview`, { method: "POST", body: form });
+      assert.equal(response.status, count === 400 ? 200 : 400);
+      if (count === 400) assert.deepEqual(await response.json(), { files: 400 });
+    }
+  } finally {
+    if (previousUploadDir === undefined) delete process.env.UPLOAD_DIR;
+    else process.env.UPLOAD_DIR = previousUploadDir;
+    await new Promise<void>((resolve, reject) => {
+      server.close((error) => error ? reject(error) : resolve());
+      server.closeAllConnections();
+    });
+    await rm(directory, { recursive: true, force: true });
+  }
+});
 
 test("还原上传文件名的UTF-8字节，保留中文、日期、空格和特殊字符", () => {
   for (const name of [
@@ -73,7 +119,7 @@ for (const kind of [ImportKind.PRODUCT_BOARD, ImportKind.SEARCH_BOARD]) {
     const service = new ImportsService(prisma as never);
     // 使用真实Multer默认解码和浏览器FormData格式，覆盖乱码实际产生的边界。
     const app = express();
-    app.post("/preview", multer({ dest: directory }).array("files", 100), async (req, res, next) => {
+    app.post("/preview", multer({ dest: directory }).array("files", 400), async (req, res, next) => {
       try {
         res.json(await service.createPreview(req.files as Express.Multer.File[], "operator-1", kind));
       } catch (error) { next(error); }

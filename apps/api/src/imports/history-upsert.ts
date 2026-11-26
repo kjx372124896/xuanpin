@@ -10,7 +10,8 @@ const commonColumns: readonly Column[] = [
 const productColumns: readonly Column[] = [
   ["id", "历史记录ID", "text"], ["productId", "商品ID", "text"], ["boardType", "榜单类型", '"榜单类型"'],
   ["weekStart", "周开始日期", "date"], ["weekEnd", "周结束日期", "date"], ["rawPeriod", "原始日期范围", "text"],
-  ["categoryName", "类目名称", "text"], ["categoryLevel1", "一级类目", "text"], ["categoryLevel2", "二级类目", "text"],
+  ["categoryName", "类目名称", "text"], ["categoryLevel1", "一级类目", "text"],
+  ["categoryLevel2", "二级类目", "text"], ["categoryLevel3", "三级类目", "text"],
   ["rank", "行业排名", "integer"], ["trend", "趋势", "text"],
   ...(["visitor", "buyer", "cart"] as const).flatMap((prefix, index): Column[] => {
     const label = ["访客数", "支付买家数", "加购人数"][index];
@@ -22,6 +23,7 @@ const productColumns: readonly Column[] = [
 const searchColumns: readonly Column[] = [
   ["id", "搜索历史ID", "text"], ["searchTerm", "搜索词", "text"], ["categoryName", "类目", "text"],
   ["categoryLevel1", "一级类目", "text"], ["categoryLevel2", "二级类目", "text"],
+  ["categoryLevel3", "三级类目", "text"],
   ["classificationName", "分类名称", "text"], ["searchTermType", "搜索词类型", "text"],
   ["boardType", "搜索榜单类型", "text"], ["dimension", "统计维度", "text"], ["searchDate", "统计日期", "date"],
   ["rank", "排名", "integer"], ["searchPeopleRaw", "搜索人数原值", "text"],
@@ -44,7 +46,10 @@ export function historyUpsertQuery(kind: "product" | "search", rows: readonly ob
   const quoted = (name: string) => Prisma.raw(`"${name}"`);
   const values = rows.map((row) => {
     const data = { ...row, id: randomBytes(12).toString("hex"), importedAt: new Date() } as Record<string, unknown>;
-    return Object.fromEntries(columns.map(([property, column]) => [column, data[property] ?? null]));
+    return Object.fromEntries(columns.map(([property, column]) => [
+      column,
+      data[property] ?? (column === "三级类目" ? "无三级类目" : null),
+    ]));
   });
   const updates = columns.filter(([, column], index) => index > 0 && !unique.includes(column));
   return Prisma.sql`

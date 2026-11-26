@@ -6,6 +6,7 @@ import { CategoriesService } from "./categories.service";
 class CreateCategoryDto {
   @IsString() @MinLength(1) @MaxLength(255) categoryLevel1!: string;
   @IsOptional() @IsString() @MinLength(1) @MaxLength(255) categoryLevel2?: string;
+  @IsOptional() @IsString() @MinLength(1) @MaxLength(255) categoryLevel3?: string;
   @IsOptional() @IsString() responsibleUserId?: string | null;
 }
 
@@ -26,8 +27,11 @@ export class CategoriesController {
   }
 
   @Get("search-overview")
-  searchOverview() {
-    return this.categoriesService.searchOverview();
+  searchOverview(@Query("searchTermType") searchTermType?: string) {
+    if (searchTermType && searchTermType !== "搜索词" && searchTermType !== "核心词") {
+      throw new BadRequestException("搜索词类型无效。");
+    }
+    return this.categoriesService.searchOverview(searchTermType as "搜索词" | "核心词" | undefined);
   }
 
   @Roles("ADMIN", "SUPER_ADMIN")

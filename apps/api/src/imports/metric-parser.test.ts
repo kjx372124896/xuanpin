@@ -24,7 +24,7 @@ async function parseWorkbook(headers: string[], specialValue: string) {
     sheet.addRow(headers);
     const values: ExcelJS.CellValue[] = [
       "市场", "商品排行", "商品", "周", "2026-11-02 至 2026-11-08", "厨房用品",
-      "2026-11-09 12:00:00", 1, "上升", "厨房用品/厨房置物架", "测试商品",
+      "2026-11-09 12:00:00", 1, "上升", "厨房用品 / 厨房置物架 / 调料架/刀架", "测试商品",
       "1070000000000", "https://item.taobao.com/item.htm?id=1070000000000", "测试店铺",
       "天猫", "100~200", "10~20", specialValue, "https://img.example.com/item.jpg",
     ];
@@ -43,6 +43,9 @@ test("新品流量文件解析后保存加购人数，商品关键词保持为�
   assert.equal(result.boardType, "NEW_PRODUCT_TRAFFIC");
   assert.equal(result.rows[0].cart.raw, "8");
   assert.equal(result.rows[0].productKeyword, null);
+  assert.equal(result.rows[0].categoryLevel1, "厨房用品");
+  assert.equal(result.rows[0].categoryLevel2, "厨房置物架");
+  assert.equal(result.rows[0].categoryLevel3, "调料架/刀架");
 });
 
 test("交易增速文件解析后保存商品关键词，加购人数保持为空", async () => {
@@ -52,6 +55,7 @@ test("交易增速文件解析后保存商品关键词，加购人数保持为�
   assert.equal(result.boardType, "TRANSACTION_GROWTH");
   assert.equal(result.rows[0].cart.raw, null);
   assert.equal(result.rows[0].productKeyword, "调料架 厨房收纳");
+  assert.equal(result.rows[0].categoryLevel3, "调料架/刀架");
 });
 
 test("解析精确值与常见区间", () => {
@@ -72,12 +76,25 @@ test("异常区间不伪装成零", () => {
   assert.deepEqual(parseMetric("{}"), { raw: null, min: null, max: null, median: null, valid: true });
 });
 
-test("类目按第一个斜杠拆成一级和二级，保留原始类目", () => {
-  assert.deepEqual(parseCategoryName("餐饮具 / 咖啡杯"), { raw: "餐饮具 / 咖啡杯", level1: "餐饮具", level2: "咖啡杯" });
-  assert.deepEqual(parseCategoryName(" 家居用品/收纳/旅行收纳 "), { raw: "家居用品/收纳/旅行收纳", level1: "家居用品", level2: "收纳/旅行收纳" });
-  assert.deepEqual(parseCategoryName("厨房用品"), { raw: "厨房用品", level1: "厨房用品", level2: "无二级类目" });
-  assert.deepEqual(parseCategoryName("餐饮具 / "), { raw: "餐饮具 /", level1: "餐饮具", level2: "无二级类目" });
+test("类目仅按两侧有空格的斜杠拆成最多三级，保留名称内部斜杠", () => {
+  assert.deepEqual(parseCategoryName("餐饮具 / 咖啡杯"), {
+    raw: "餐饮具 / 咖啡杯", level1: "餐饮具", level2: "咖啡杯", level3: "无三级类目",
+  });
+  assert.deepEqual(parseCategoryName("餐饮具 / 杯子/水杯/水壶 / 奶杯/牛奶杯"), {
+    raw: "餐饮具 / 杯子/水杯/水壶 / 奶杯/牛奶杯",
+    level1: "餐饮具", level2: "杯子/水杯/水壶", level3: "奶杯/牛奶杯",
+  });
+  assert.deepEqual(parseCategoryName(" 家居用品/收纳/旅行收纳 "), {
+    raw: "家居用品/收纳/旅行收纳", level1: "家居用品/收纳/旅行收纳",
+    level2: "无二级类目", level3: "无三级类目",
+  });
+  assert.deepEqual(parseCategoryName("厨房用品"), {
+    raw: "厨房用品", level1: "厨房用品", level2: "无二级类目", level3: "无三级类目",
+  });
+  assert.equal(parseCategoryName("餐饮具 / "), null);
   assert.equal(parseCategoryName(" / 咖啡杯"), null);
+  assert.equal(parseCategoryName("一级 / 二级 / 三级 / 四级"), null);
+  assert.equal(parseCategoryName("一级 /  / 三级"), null);
 });
 
 test("解析周周期", () => {

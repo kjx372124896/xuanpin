@@ -34,6 +34,9 @@ interface SearchTrendItem {
   favoriteUsers?: Array<{ userId: string; name: string; username: string; department: string | null; favoritedAt: string }>;
   searchTerm: string;
   categoryName: string;
+  categoryLevel1: string;
+  categoryLevel2: string;
+  categoryLevel3: string;
   classificationName: string | null;
   searchTermType: string;
   boardType: string;
@@ -70,7 +73,7 @@ interface SearchTrendResult {
 }
 interface SearchTrendOptions {
   categories: string[];
-  categoryLevels: Array<{ categoryLevel1: string; categoryLevel2: string }>;
+  categoryLevels: Array<{ categoryLevel1: string; categoryLevel2: string; categoryLevel3: string }>;
   searchTermTypes: string[];
   boardTypes: string[];
   latestDate: string | null;
@@ -80,6 +83,7 @@ interface SearchFilters {
   endDate?: string;
   categoryLevel1?: string[];
   categoryLevel2?: string[];
+  categoryLevel3?: string[];
   searchTermType?: string[];
   boardType?: string[];
   keyword?: string;
@@ -270,11 +274,13 @@ export function SearchTrendsPage() {
   const categoryOptions = useMemo(() => {
     const levels = optionsQuery.data?.categoryLevels ?? [];
     const selectedLevel1 = new Set(draft.categoryLevel1 ?? []);
+    const selectedLevel2 = new Set(draft.categoryLevel2 ?? []);
     return {
       level1: [...new Set(levels.map((item) => item.categoryLevel1))],
       level2: [...new Set(levels.filter((item) => selectedLevel1.has(item.categoryLevel1)).map((item) => item.categoryLevel2))],
+      level3: [...new Set(levels.filter((item) => selectedLevel1.has(item.categoryLevel1) && selectedLevel2.has(item.categoryLevel2)).map((item) => item.categoryLevel3))],
     };
-  }, [optionsQuery.data?.categoryLevels, draft.categoryLevel1]);
+  }, [optionsQuery.data?.categoryLevels, draft.categoryLevel1, draft.categoryLevel2]);
 
   useEffect(() => {
     if (optionsQuery.isLoading || initialized) return;
@@ -305,6 +311,7 @@ export function SearchTrendsPage() {
       params.comparisonMode = filters.comparisonMode ?? "previousMonth";
       if (filters.categoryLevel1?.length) params.categoryLevel1 = filters.categoryLevel1.join(",");
       if (filters.categoryLevel2?.length) params.categoryLevel2 = filters.categoryLevel2.join(",");
+      if (filters.categoryLevel3?.length) params.categoryLevel3 = filters.categoryLevel3.join(",");
       if (filters.searchTermType?.length) params.searchTermType = filters.searchTermType.join(",");
       if (filters.boardType?.length) params.boardType = filters.boardType.join(",");
       if (filters.keyword) params.keyword = filters.keyword;
@@ -386,15 +393,21 @@ export function SearchTrendsPage() {
         <div className="latest-rank-cell">
           <Typography.Text strong className="latest-rank-value">{value ?? "—"}</Typography.Text>
           <div className="latest-rank-meta">
-            {item.categoryName && (
+            {[
+              { label: "一级类目", value: item.categoryLevel1 },
+              { label: "二级类目", value: item.categoryLevel2 },
+              { label: "三级类目", value: item.categoryLevel3 },
+            ].map(({ label, value: category }) => (
               <Typography.Text
+                key={label}
                 type="secondary"
                 className="latest-rank-category"
-                ellipsis={{ tooltip: item.categoryName }}
+                aria-label={`${label}：${category || "—"}`}
+                ellipsis={{ tooltip: `${label}：${category || "—"}` }}
               >
-                {item.categoryName}
+                {category || "—"}
               </Typography.Text>
-            )}
+            ))}
             {item.searchTermType && <Tag className="latest-rank-type" title={item.searchTermType}>{item.searchTermType}</Tag>}
           </div>
         </div>
@@ -512,16 +525,6 @@ export function SearchTrendsPage() {
       <Card className="filter-card filter-card-compact search-trend-filter-card" bordered={false}>
         <div className="filter-title"><FilterOutlined /> 筛选搜索词</div>
         <div className="filter-grid search-trend-filter-grid">
-          <div className="filter-field filter-field-listing-date search-trend-field-date">
-            <label>统计日期</label>
-            <DatePicker.RangePicker
-              allowClear
-              value={draft.startDate && draft.endDate ? [dayjs(draft.startDate), dayjs(draft.endDate)] : null}
-              onChange={dateChanged}
-              format="YYYY-MM-DD"
-              placeholder={["开始日期", "结束日期"]}
-            />
-          </div>
           <div className="filter-field">
             <label htmlFor="search-category-level1">一级类目</label>
             <Select
@@ -532,7 +535,7 @@ export function SearchTrendsPage() {
               optionFilterProp="label"
               maxTagCount="responsive"
               value={draft.categoryLevel1 ?? []}
-              onChange={(value) => setDraft((current) => ({ ...current, categoryLevel1: value, categoryLevel2: [] }))}
+              onChange={(value) => setDraft((current) => ({ ...current, categoryLevel1: value, categoryLevel2: [], categoryLevel3: [] }))}
               placeholder="全部一级类目"
               options={categoryOptions.level1.map((value) => ({ label: value, value }))}
             />
@@ -548,9 +551,25 @@ export function SearchTrendsPage() {
               maxTagCount="responsive"
               disabled={!draft.categoryLevel1?.length}
               value={draft.categoryLevel2 ?? []}
-              onChange={(value) => setDraft((current) => ({ ...current, categoryLevel2: value }))}
+              onChange={(value) => setDraft((current) => ({ ...current, categoryLevel2: value, categoryLevel3: [] }))}
               placeholder={draft.categoryLevel1?.length ? "全部二级类目" : "请先选择一级类目"}
               options={categoryOptions.level2.map((value) => ({ label: value, value }))}
+            />
+          </div>
+          <div className="filter-field">
+            <label htmlFor="search-category-level3">三级类目</label>
+            <Select
+              id="search-category-level3"
+              mode="multiple"
+              allowClear
+              showSearch
+              optionFilterProp="label"
+              maxTagCount="responsive"
+              disabled={!draft.categoryLevel1?.length || !draft.categoryLevel2?.length}
+              value={draft.categoryLevel3 ?? []}
+              onChange={(value) => setDraft((current) => ({ ...current, categoryLevel3: value }))}
+              placeholder={draft.categoryLevel2?.length ? "全部三级类目" : "请先选择二级类目"}
+              options={categoryOptions.level3.map((value) => ({ label: value, value }))}
             />
           </div>
           <div className="filter-field">
@@ -577,7 +596,17 @@ export function SearchTrendsPage() {
               options={(optionsQuery.data?.boardTypes ?? []).map((value) => ({ label: value, value }))}
             />
           </div>
-          <div className="filter-field">
+          <div className="filter-field filter-field-listing-date search-trend-field-date">
+            <label>统计日期</label>
+            <DatePicker.RangePicker
+              allowClear
+              value={draft.startDate && draft.endDate ? [dayjs(draft.startDate), dayjs(draft.endDate)] : null}
+              onChange={dateChanged}
+              format="YYYY-MM-DD"
+              placeholder={["开始日期", "结束日期"]}
+            />
+          </div>
+          <div className="filter-field search-trend-field-keyword">
             <label>搜索词</label>
             <Input
               allowClear
@@ -587,14 +616,6 @@ export function SearchTrendsPage() {
               onPressEnter={applyFilters}
               placeholder="输入搜索词"
             />
-          </div>
-          <div className="filter-field">
-            <label>搜索人数中值</label>
-            <div className="filter-range-control">
-              <InputNumber min={0} value={draft.searchPeopleMin} onChange={(value) => setDraft((current) => ({ ...current, searchPeopleMin: value === null ? undefined : Number(value) }))} placeholder="最小值" />
-              <span className="filter-range-separator">-</span>
-              <InputNumber min={0} value={draft.searchPeopleMax} onChange={(value) => setDraft((current) => ({ ...current, searchPeopleMax: value === null ? undefined : Number(value) }))} placeholder="最大值" />
-            </div>
           </div>
           <div className="filter-field search-trend-field-comparison-mode">
             <label>对比方式</label>
@@ -606,6 +627,15 @@ export function SearchTrendsPage() {
                 { label: "环比去年同期", value: "previousYear" },
               ]}
             />
+          </div>
+          <div className="filter-field filter-field-favorites search-trend-field-favorites">
+            {showTeamFavorites ? <>
+              <label htmlFor="search-favorite-member">收藏成员</label>
+              <Input id="search-favorite-member" allowClear placeholder="姓名/账号/部门" value={draft.memberKeyword} onChange={(event) => setDraft((current) => ({ ...current, memberKeyword: event.target.value }))} onPressEnter={applyFilters} />
+            </> : <>
+              <label htmlFor="search-favorites">收藏范围</label>
+              <Checkbox id="search-favorites" checked={draft.favoritesOnly ?? false} onChange={(event) => setDraft((current) => ({ ...current, favoritesOnly: event.target.checked || undefined }))}>仅看我的收藏</Checkbox>
+            </>}
           </div>
           <div className="filter-field search-trend-field-min-growth">
             <label>最低环比增长率</label>
@@ -619,14 +649,13 @@ export function SearchTrendsPage() {
               style={{ width: "100%" }}
             />
           </div>
-          <div className="filter-field filter-field-favorites search-trend-field-favorites">
-            {showTeamFavorites ? <>
-              <label htmlFor="search-favorite-member">收藏成员</label>
-              <Input id="search-favorite-member" allowClear placeholder="姓名/账号/部门" value={draft.memberKeyword} onChange={(event) => setDraft((current) => ({ ...current, memberKeyword: event.target.value }))} onPressEnter={applyFilters} />
-            </> : <>
-              <label htmlFor="search-favorites">收藏范围</label>
-              <Checkbox id="search-favorites" checked={draft.favoritesOnly ?? false} onChange={(event) => setDraft((current) => ({ ...current, favoritesOnly: event.target.checked || undefined }))}>仅看我的收藏</Checkbox>
-            </>}
+          <div className="filter-field search-trend-field-people">
+            <label>搜索人数中值</label>
+            <div className="filter-range-control">
+              <InputNumber min={0} value={draft.searchPeopleMin} onChange={(value) => setDraft((current) => ({ ...current, searchPeopleMin: value === null ? undefined : Number(value) }))} placeholder="最小值" />
+              <span className="filter-range-separator">-</span>
+              <InputNumber min={0} value={draft.searchPeopleMax} onChange={(value) => setDraft((current) => ({ ...current, searchPeopleMax: value === null ? undefined : Number(value) }))} placeholder="最大值" />
+            </div>
           </div>
           <div className="filter-actions search-trend-filter-actions">
             <Button type="primary" onClick={applyFilters}>查询</Button>

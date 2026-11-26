@@ -3,7 +3,7 @@ import { after, test } from "node:test";
 import { PrismaClient, type ImportBatch, type User } from "@prisma/client";
 import ExcelJS from "exceljs";
 import { randomBytes } from "node:crypto";
-import { mkdtemp, rm, stat } from "node:fs/promises";
+import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { upsertHistories } from "./history-upsert";
@@ -25,6 +25,48 @@ const prisma = databaseUrl ? new PrismaClient({ datasourceUrl: databaseUrl }) : 
 after(async () => { await prisma?.$disconnect(); });
 const integration = (name: string, run: () => Promise<void>) => test(name, { skip: !prisma }, run);
 const unique = () => randomBytes(10).toString("hex");
+
+integration("PostgreSQL：三级迁移合并空格不同的缺省节点，并保留已有负责人和启用状态", async () => {
+  const migration = await readFile(path.resolve(__dirname, "../../../../prisma/migrations/20261126100000_three_level_categories/migration.sql"), "utf8");
+  const start = migration.indexOf("WITH third_levels AS (");
+  const end = migration.indexOf("-- Refresh the latest category snapshots", start);
+  assert.ok(start >= 0 && end > start);
+  const query = migration.slice(start, end);
+
+  await prisma!.$transaction(async (tx) => {
+    await tx.$executeRawUnsafe(`CREATE TEMP TABLE "商品上榜历史表" (
+      "类目名称" TEXT, "一级类目" TEXT, "二级类目" TEXT, "三级类目" TEXT
+    ) ON COMMIT DROP`);
+    await tx.$executeRawUnsafe(`CREATE TEMP TABLE "搜索词日历史表" (
+      "类目" TEXT, "一级类目" TEXT, "二级类目" TEXT, "三级类目" TEXT
+    ) ON COMMIT DROP`);
+    await tx.$executeRawUnsafe(`CREATE TEMP TABLE "类目表" (
+      "类目ID" TEXT PRIMARY KEY, "类目名称" TEXT UNIQUE,
+      "一级类目" TEXT, "二级类目" TEXT, "三级类目" TEXT,
+      "负责人ID" TEXT, "是否启用" BOOLEAN, "创建时间" TIMESTAMP, "更新时间" TIMESTAMP
+    ) ON COMMIT DROP`);
+    await tx.$executeRawUnsafe(`INSERT INTO "商品上榜历史表" VALUES
+      ('餐饮具 / 杯子', '餐饮具', '杯子', '无三级类目'),
+      ('餐饮具  /  杯子', '餐饮具', '杯子', '无三级类目'),
+      ('餐饮具 / 杯子 / 奶杯', '餐饮具', '杯子', '奶杯')`);
+    await tx.$executeRawUnsafe(`INSERT INTO "搜索词日历史表" VALUES
+      ('餐饮具   /   杯子', '餐饮具', '杯子', '无三级类目')`);
+    await tx.$executeRawUnsafe(`INSERT INTO "类目表" VALUES
+      ('existing-node', '餐饮具 / 杯子 / 无三级类目', '餐饮具', '杯子', '无三级类目', 'employee-1', FALSE, NOW(), NOW())`);
+
+    assert.equal(await tx.$executeRawUnsafe(query), 2);
+    assert.equal(await tx.$executeRawUnsafe(query), 2);
+    const rows = await tx.$queryRawUnsafe<Array<{ name: string; owner: string | null; enabled: boolean }>>(`
+      SELECT "类目名称" AS name, "负责人ID" AS owner, "是否启用" AS enabled
+      FROM "类目表" ORDER BY "类目名称"
+    `);
+    assert.equal(rows.length, 2);
+    assert.ok(rows.some((row) => row.name === "餐饮具 / 杯子 / 奶杯"));
+    assert.deepEqual(rows.find((row) => row.name === "餐饮具 / 杯子 / 无三级类目"), {
+      name: "餐饮具 / 杯子 / 无三级类目", owner: "employee-1", enabled: false,
+    });
+  });
+});
 
 integration("PostgreSQL：搜索词收藏隔离账号和分组，成员筛选、计数分页及幂等取消保持一致", async () => {
   const prefix = `favorite-${unique()}`;
@@ -208,13 +250,14 @@ integration("PostgreSQL：搜索词、排名和人数均相同时，不同类目
 integration("PostgreSQL：真实Excel预览、并发确认、后台串行入库和旧文件补导完整流程", async () => {
   const directory = await mkdtemp(path.join(tmpdir(), "selection-import-review-"));
   const productId = `107${Date.now().toString().slice(-10)}`;
+  const categoryLevel1 = `集成测试-${unique()}`;
   const service = new ImportsService(prisma as never);
   const batchIds: string[] = [];
   async function preview(name: string, week: string, end: string, exported: string, title: string, buyer: string) {
     const workbook = new ExcelJS.Workbook();
     const sheet = workbook.addWorksheet("合并数据");
     sheet.addRow(["商品ID", "商品名称", "日期范围", "类目名称", "访客数", "支付买家数", "加购人数", "导出时间"]);
-    sheet.addRow([productId, title, `${week}~${end}`, "集成测试 / 杯子", "1000", buyer, "10", exported]);
+    sheet.addRow([productId, title, `${week}~${end}`, `${categoryLevel1} / 杯子 / 奶杯`, "1000", buyer, "10", exported]);
     const filePath = path.join(directory, name);
     await workbook.xlsx.writeFile(filePath);
     const result = await service.createPreview([{ path: filePath, originalname: name, size: (await stat(filePath)).size } as Express.Multer.File], "review-operator");
@@ -248,11 +291,16 @@ integration("PostgreSQL：真实Excel预览、并发确认、后台串行入库�
     const stats = await prisma!.productBoardStats.findUniqueOrThrow({ where: { productId_boardType: { productId, boardType: "NEW_PRODUCT_TRAFFIC" } } });
     assert.equal(stats.historyWeekCount, 2);
     assert.equal(Number(stats.latestBuyerMedian), 200);
+    assert.equal(stats.latestCategoryLevel3, "奶杯");
+    assert.ok((await prisma!.productHistory.findMany({ where: { productId } })).every((row) => row.categoryLevel3 === "奶杯"));
+    assert.equal((await prisma!.product.findUniqueOrThrow({ where: { productId } })).latestCategoryLevel3, "奶杯");
+    assert.ok(await prisma!.category.findFirst({ where: { categoryLevel1, categoryLevel2: "杯子", categoryLevel3: "奶杯" } }));
     assert.equal((await prisma!.importBatch.findUniqueOrThrow({ where: { id: older } })).duplicateRows, 1);
   } finally {
     service.onModuleDestroy();
     await prisma!.product.deleteMany({ where: { productId } });
     await prisma!.importBatch.deleteMany({ where: { id: { in: batchIds } } });
+    await prisma!.category.deleteMany({ where: { categoryLevel1 } });
     const relative = path.relative(tmpdir(), directory);
     if (!relative.startsWith("..") && !path.isAbsolute(relative)) await rm(directory, { recursive: true, force: true });
   }
@@ -268,7 +316,7 @@ integration("PostgreSQL：搜索Excel拆分层级并保存，父级数据只计�
   const weekStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - (now.getUTCDay() + 6) % 7 - 7));
   try {
     await prisma!.category.createMany({ data: buildCategoryRegistryRows([
-      { categoryName: `${level1} / 未导入子类`, categoryLevel1: level1, categoryLevel2: "未导入子类" },
+      { categoryName: `${level1} / 未导入子类`, categoryLevel1: level1, categoryLevel2: "未导入子类", categoryLevel3: "无三级类目" },
     ]), skipDuplicates: true });
     const workbook = new ExcelJS.Workbook();
     const sheet = workbook.addWorksheet("搜索排行");
@@ -299,18 +347,34 @@ integration("PostgreSQL：搜索Excel拆分层级并保存，父级数据只计�
     assert.equal(complete, true);
     const saved = await prisma!.searchTermHistory.findMany({ where: { searchTerm: term } });
     assert.equal(saved.length, 10);
-    assert.ok(saved.every((row) => row.categoryLevel1 === level1));
+    assert.ok(saved.every((row) => row.categoryLevel1 === level1 || row.categoryLevel1 === `${level1}/家庭整理用具`));
+    assert.equal(saved.filter((row) => row.categoryLevel1 === `${level1}/家庭整理用具` && row.categoryLevel2 === "无二级类目").length, 1);
     assert.equal(saved.filter((row) => row.categoryName === level1 && row.categoryLevel2 === "无二级类目").length, 7);
-    const overview = await new CategoriesService(prisma as never).searchOverview();
+    const categoryService = new CategoriesService(prisma as never);
+    const overview = await categoryService.searchOverview("核心词");
     const parent = overview.categories.find((row) => row.categoryLevel1 === level1)!;
     const unclassified = parent.children.find((row) => row.categoryLevel2 === "无二级类目")!;
     const child = parent.children.find((row) => row.categoryLevel2 === "家庭整理用具")!;
     const missing = parent.children.find((row) => row.categoryLevel2 === "未导入子类")!;
     assert.equal(unclassified.weekCounts[11].daysWithData, 7);
     assert.equal(child.weekCounts[11].daysWithData, 2);
-    assert.equal(child.weekCounts[11].recordCount, 3);
+    assert.equal(child.weekCounts[11].recordCount, 2);
     assert.equal(missing.weekCounts[11].daysWithData, 0);
-    assert.deepEqual(parent.weekProgress[11], { weekStart: weekStart.toISOString().slice(0, 10), imported: 1, total: 3, partial: 1, recordCount: 10 });
+    assert.deepEqual(parent.weekProgress[11], { weekStart: weekStart.toISOString().slice(0, 10), imported: 1, total: 3, partial: 1, recordCount: 9 });
+    await prisma!.searchTermHistory.createMany({ data: Array.from({ length: 3 }, (_, day) => ({
+      searchTerm: term, categoryName: level1, categoryLevel1: level1, categoryLevel2: "无二级类目",
+      searchTermType: "搜索词", boardType: "热搜榜", dimension: "日",
+      searchDate: new Date(weekStart.getTime() + day * 24 * 60 * 60 * 1000), searchPeopleMedian: 100,
+    })) });
+    const searchOverview = await categoryService.searchOverview("搜索词");
+    const searchParent = searchOverview.categories.find((row) => row.categoryLevel1 === level1)!;
+    const searchUnclassified = searchParent.children.find((row) => row.categoryLevel2 === "无二级类目")!;
+    assert.equal(searchUnclassified.weekCounts[11].daysWithData, 3);
+    assert.equal(searchUnclassified.weekCounts[11].recordCount, 3);
+    assert.equal(searchParent.weekProgress[11].imported, 0);
+    const coreOverview = await categoryService.searchOverview("核心词");
+    const coreParent = coreOverview.categories.find((row) => row.categoryLevel1 === level1)!;
+    assert.deepEqual(coreParent.weekProgress[11], parent.weekProgress[11]);
   } finally {
     service.onModuleDestroy();
     await prisma!.searchTermHistory.deleteMany({ where: { searchTerm: term } });
@@ -328,7 +392,7 @@ integration("PostgreSQL：搜索趋势按一级、二级类目组合筛选，日
   const searchTerm = `类目筛选-${unique()}`;
   const rows = [
     { categoryName: level1, categoryLevel1: level1, categoryLevel2: "无二级类目", value: 50 },
-    { categoryName: `${level1} / 家庭整理用具`, categoryLevel1: level1, categoryLevel2: "家庭整理用具", value: 100 },
+    { categoryName: `${level1} / 家庭整理用具 / 衣柜/抽屉收纳`, categoryLevel1: level1, categoryLevel2: "家庭整理用具", categoryLevel3: "衣柜/抽屉收纳", value: 100 },
     { categoryName: `${otherLevel1} / 家庭整理用具`, categoryLevel1: otherLevel1, categoryLevel2: "家庭整理用具", value: 400 },
   ];
   try {
@@ -342,7 +406,8 @@ integration("PostgreSQL：搜索趋势按一级、二级类目组合筛选，日
     assert.equal(parent.total, 2);
     const child = await service.list({ ...filters, categoryLevel1: [level1], categoryLevel2: ["家庭整理用具"] });
     assert.equal(child.total, 1);
-    assert.equal(child.items[0].categoryName, `${level1} / 家庭整理用具`);
+    assert.equal(child.items[0].categoryName, `${level1} / 家庭整理用具 / 衣柜/抽屉收纳`);
+    assert.deepEqual([child.items[0].categoryLevel1, child.items[0].categoryLevel2, child.items[0].categoryLevel3], [level1, "家庭整理用具", "衣柜/抽屉收纳"]);
     assert.equal(child.items[0].previousDailyAverage, 100);
     assert.equal(child.items[0].currentDailyAverage, 200);
     assert.equal(child.items[0].growthRate, 100);
@@ -351,6 +416,7 @@ integration("PostgreSQL：搜索趋势按一级、二级类目组合筛选，日
     const unclassified = await service.list({ ...filters, categoryLevel1: level1, categoryLevel2: "无二级类目" });
     assert.equal(unclassified.total, 1);
     assert.equal(unclassified.items[0].categoryName, level1);
+    assert.deepEqual([unclassified.items[0].categoryLevel1, unclassified.items[0].categoryLevel2, unclassified.items[0].categoryLevel3], [level1, "无二级类目", "无三级类目"]);
     const multi = await service.list({ ...filters, categoryLevel1: `${level1},${otherLevel1}`, categoryLevel2: "家庭整理用具" });
     assert.equal(multi.total, 2);
     const missing = await service.list({ ...filters, categoryLevel1: level1, categoryLevel2: "不存在的二级类目" });

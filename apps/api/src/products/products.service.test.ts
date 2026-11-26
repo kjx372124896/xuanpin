@@ -2,26 +2,27 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { ProductsService } from "./products.service";
 
-test("类目选项按当前榜单类型查询，选择一级类目后只收窄二级类目", async () => {
+test("类目选项按当前榜单类型查询，并按一级、二级类目逐级收窄三级选项", async () => {
   const calls: Array<{ where: Record<string, unknown> }> = [];
   const prisma = {
     productHistory: {
       groupBy: async (args: { where: Record<string, unknown> }) => {
         calls.push(args);
         return [
-          { categoryLevel1: "厨房用品", categoryLevel2: "厨房置物架" },
-          { categoryLevel1: "厨房用品", categoryLevel2: "调料收纳" },
-          { categoryLevel1: "宠物用品", categoryLevel2: "宠物垫" },
+          { categoryLevel1: "厨房用品", categoryLevel2: "厨房置物架", categoryLevel3: "调料架" },
+          { categoryLevel1: "厨房用品", categoryLevel2: "调料收纳", categoryLevel3: "调料盒" },
+          { categoryLevel1: "宠物用品", categoryLevel2: "宠物垫", categoryLevel3: "防水垫" },
         ];
       },
     },
   };
 
   const service = new ProductsService(prisma as never);
-  const result = await service.categories(["厨房用品"], "TRANSACTION_GROWTH");
+  const result = await service.categories(["厨房用品"], ["厨房置物架"], "TRANSACTION_GROWTH");
 
   assert.deepEqual(result.level1, ["厨房用品", "宠物用品"]);
   assert.deepEqual(result.level2, ["厨房置物架", "调料收纳"]);
+  assert.deepEqual(result.level3, ["调料架"]);
   assert.deepEqual(calls[0].where, { boardType: "TRANSACTION_GROWTH" });
 });
 
@@ -29,16 +30,17 @@ test("未选择一级类目时保留当前榜单的全部一级选项且不展�
   const prisma = {
     productHistory: {
       groupBy: async () => [
-        { categoryLevel1: "厨房用品", categoryLevel2: "厨房置物架" },
-        { categoryLevel1: "宠物用品", categoryLevel2: "宠物垫" },
+        { categoryLevel1: "厨房用品", categoryLevel2: "厨房置物架", categoryLevel3: "调料架" },
+        { categoryLevel1: "宠物用品", categoryLevel2: "宠物垫", categoryLevel3: "防水垫" },
       ],
     },
   };
 
-  const result = await new ProductsService(prisma as never).categories(undefined, "NEW_PRODUCT_TRAFFIC");
+  const result = await new ProductsService(prisma as never).categories(undefined, undefined, "NEW_PRODUCT_TRAFFIC");
 
   assert.deepEqual(result.level1, ["厨房用品", "宠物用品"]);
   assert.deepEqual(result.level2, []);
+  assert.deepEqual(result.level3, []);
 });
 
 test("商品列表按当前榜单读取独立统计，且不向页面返回加购人数", async () => {

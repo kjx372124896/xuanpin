@@ -66,6 +66,7 @@ export function ProductDetailModal({ productId, open, onClose, boardType }: { pr
     { title: "结束日期", dataIndex: "weekEnd", key: "weekEnd", width: 112, render: (value) => dayjs(value).format("YYYY-MM-DD") },
     { title: "一级类目", dataIndex: "categoryLevel1", key: "categoryLevel1" },
     { title: "二级类目", dataIndex: "categoryLevel2", key: "categoryLevel2", render: (value) => value || "—" },
+    { title: "三级类目", dataIndex: "categoryLevel3", key: "categoryLevel3", render: (value) => value || "—" },
     { title: "排名", dataIndex: "rank", key: "rank", align: "center", render: (value) => value ? `#${value}` : "—" },
     { title: "支付买家数（数值）", key: "buyer", width: 150, render: (_value, row) => metricCell(row.buyer) },
     { title: "访客数（数值）", key: "visitor", width: 150, render: (_value, row) => metricCell(row.visitor) },
@@ -91,7 +92,7 @@ export function ProductDetailModal({ productId, open, onClose, boardType }: { pr
       <Card className="detail-hero" bordered={false}>
         <div className="detail-product-main">
           <Image src={product.imageUrl || undefined} width={116} height={116} className="detail-product-image" fallback="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='116' height='116'%3E%3Crect width='100%25' height='100%25' fill='%23edf1f7'/%3E%3C/svg%3E" />
-          <div className="detail-product-copy"><div className="eyebrow">PRODUCT PROFILE</div><Typography.Title level={3}>{product.productName}</Typography.Title><Space wrap><Tag color="blue">{product.latestCategoryLevel1 || "未分类"}</Tag>{product.latestCategoryLevel2 && <Tag>{product.latestCategoryLevel2}</Tag>}<Tag>{product.shopType || "未知店铺类型"}</Tag><Typography.Text type="secondary">商品 ID：{product.productId}</Typography.Text></Space><div className="detail-shopline">店铺：{product.shopName || "—"}{product.productUrl && <a href={product.productUrl} target="_blank" rel="noreferrer"><LinkOutlined /> 打开商品链接</a>}</div></div>
+          <div className="detail-product-copy"><div className="eyebrow">PRODUCT PROFILE</div><Typography.Title level={3}>{product.productName}</Typography.Title><Space wrap><Tag color="blue">{product.latestCategoryLevel1 || "未分类"}</Tag>{product.latestCategoryLevel2 && <Tag>{product.latestCategoryLevel2}</Tag>}{product.latestCategoryLevel3 && <Tag>{product.latestCategoryLevel3}</Tag>}<Tag>{product.shopType || "未知店铺类型"}</Tag><Typography.Text type="secondary">商品 ID：{product.productId}</Typography.Text></Space><div className="detail-shopline">店铺：{product.shopName || "—"}{product.productUrl && <a href={product.productUrl} target="_blank" rel="noreferrer"><LinkOutlined /> 打开商品链接</a>}</div></div>
         </div>
         <Row gutter={16} className="detail-stat-row">
           <Col xs={12} md={6}><Statistic title="最新行业排名" value={product.latestRank ?? "—"} prefix={product.latestRank ? "#" : undefined} /></Col>

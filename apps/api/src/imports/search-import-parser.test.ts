@@ -119,27 +119,34 @@ test("搜索人数区间异常记录进入错误明细，不会写成零", async
   assert.match(result.errors[0].message, /搜索人数无法解析/);
 });
 
-test("搜索词榜单类目按第一个斜杠拆分一级和二级类目", async () => {
+test("搜索词榜单类目按空格斜杠空格拆分三级并保留名称内部斜杠", async () => {
   const result = await parseRows([
-    sampleRow({ 类目: "收纳整理 / 家庭收纳用具" }),
+    sampleRow({ 类目: "收纳整理 / 家庭收纳用具 / 衣柜/抽屉收纳" }),
     sampleRow({ 搜索词: "收纳盒", 类目: "家居用品/收纳/旅行收纳" }),
   ]);
 
   assert.equal(result.rows.length, 2);
-  assert.equal(result.rows[0].categoryName, "收纳整理 / 家庭收纳用具");
+  assert.equal(result.rows[0].categoryName, "收纳整理 / 家庭收纳用具 / 衣柜/抽屉收纳");
   assert.equal(result.rows[0].categoryLevel1, "收纳整理");
   assert.equal(result.rows[0].categoryLevel2, "家庭收纳用具");
-  assert.equal(result.rows[1].categoryLevel1, "家居用品");
-  assert.equal(result.rows[1].categoryLevel2, "收纳/旅行收纳");
+  assert.equal(result.rows[0].categoryLevel3, "衣柜/抽屉收纳");
+  assert.equal(result.rows[1].categoryLevel1, "家居用品/收纳/旅行收纳");
+  assert.equal(result.rows[1].categoryLevel2, "无二级类目");
+  assert.equal(result.rows[1].categoryLevel3, "无三级类目");
 });
 
 test("没有二级类目时标记为无二级类目，无法识别一级类目时拒绝该行", async () => {
   const noSecondLevel = await parseRows([sampleRow({ 类目: "餐饮具" })]);
   assert.equal(noSecondLevel.rows[0].categoryLevel1, "餐饮具");
   assert.equal(noSecondLevel.rows[0].categoryLevel2, "无二级类目");
+  assert.equal(noSecondLevel.rows[0].categoryLevel3, "无三级类目");
 
   const invalid = await parseRows([sampleRow({ 类目: " / 家庭收纳用具" })]);
   assert.equal(invalid.rows.length, 0);
   assert.equal(invalid.errors.length, 1);
-  assert.match(invalid.errors[0].message, /一级类目无法识别/);
+  assert.match(invalid.errors[0].message, /类目格式错误/);
+
+  const tooDeep = await parseRows([sampleRow({ 类目: "一级 / 二级 / 三级 / 四级" })]);
+  assert.equal(tooDeep.rows.length, 0);
+  assert.match(tooDeep.errors[0].message, /最多支持三级/);
 });

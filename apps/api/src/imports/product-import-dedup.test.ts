@@ -1,10 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import ExcelJS from "exceljs";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { ImportsService } from "./imports.service";
+import { ImportsService, readProductPreviewRows } from "./imports.service";
 import { deduplicateProductImportRows } from "./product-import-dedup";
 
 function candidate(
@@ -97,6 +97,36 @@ async function createWorkbook(directory: string, name: string, boardType: "NEW_P
     size: (await readFile(filePath)).byteLength,
   } as Express.Multer.File;
 }
+
+test("商品预览文件保留真实三级类目，并兼容缺少三级字段的旧预览", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "selection-product-preview-levels-"));
+  try {
+    const filePath = join(directory, "fixture.preview.json");
+    const period = { weekStart: "2026-11-09", weekEnd: "2026-11-15", exportTime: "2026-11-23T10:00:00.000Z" };
+    await writeFile(filePath, JSON.stringify({ version: 1, rows: [
+      { ...period, categoryName: "餐饮具 / 杯子 / 奶杯", categoryLevel1: "餐饮具", categoryLevel2: "杯子", categoryLevel3: "奶杯" },
+      { ...period, categoryName: "餐饮具 / 杯子 / 奶杯", categoryLevel1: "餐饮具", categoryLevel2: "杯子 / 奶杯" },
+      { ...period, categoryName: "餐饮具 / 杯子", categoryLevel1: "餐饮具", categoryLevel2: "杯子" },
+      { ...period, categoryName: "餐饮具", categoryLevel1: "餐饮具", categoryLevel2: "无二级类目", categoryLevel3: "无三级类目" },
+      { ...period, categoryName: "一级 / 二级 / 三级 / 四级", categoryLevel1: "一级", categoryLevel2: "二级 / 三级 / 四级" },
+    ] }));
+
+    const rows = await readProductPreviewRows(filePath);
+    assert.deepEqual(rows.map((row) => [row.categoryLevel1, row.categoryLevel2, row.categoryLevel3]), [
+      ["餐饮具", "杯子", "奶杯"],
+      ["餐饮具", "杯子", "奶杯"],
+      ["餐饮具", "杯子", "无三级类目"],
+      ["餐饮具", "无二级类目", "无三级类目"],
+      ["一级", "二级 / 三级 / 四级", "无三级类目"],
+    ]);
+    assert.equal(rows[0].categoryName, "餐饮具 / 杯子 / 奶杯");
+    assert.equal(rows[0].weekStart.toISOString(), "2026-11-09T00:00:00.000Z");
+    assert.equal(rows[0].weekEnd.toISOString(), "2026-11-15T00:00:00.000Z");
+    assert.equal(rows[0].exportTime?.toISOString(), period.exportTime);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
 
 test("商品榜单预览阶段跨文件归并，并把胜出行保存为后台入库数据", async () => {
   const directory = await mkdtemp(join(tmpdir(), "selection-product-import-preview-"));

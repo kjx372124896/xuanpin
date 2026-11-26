@@ -20,6 +20,7 @@ export interface ParsedImportRow {
   categoryName: string;
   categoryLevel1: string;
   categoryLevel2: string;
+  categoryLevel3: string;
   rank: number | null;
   trend: string | null;
   visitor: ReturnType<typeof parseMetric>;
@@ -136,7 +137,8 @@ export async function parseImportWorkbook(filePath: string): Promise<ImportParse
     rowCount += 1;
 
     const period = parseWeekPeriod(cellText(read(row, "日期范围")));
-    const category = parseCategoryName(cellText(read(row, "类目名称")));
+    const categoryRaw = cellText(read(row, "类目名称"));
+    const category = parseCategoryName(categoryRaw);
     const categoryName = category?.raw ?? "";
     const visitor = parseMetric(cellText(read(row, "访客数")));
     const buyer = parseMetric(cellText(read(row, "支付买家数")));
@@ -151,7 +153,7 @@ export async function parseImportWorkbook(filePath: string): Promise<ImportParse
     if (!productId) problems.push("商品ID为空");
     if (!productName) problems.push("商品名称为空");
     if (!period) problems.push("日期范围格式错误");
-    if (!category) problems.push("类目名称为空或一级类目无法识别");
+    if (!category) problems.push(categoryRaw ? "类目格式错误：最多支持三级，且各级名称不能为空" : "类目名称为空或一级类目无法识别");
     if (!visitor.valid) problems.push(`访客数无法解析：${visitor.raw ?? "空值"}`);
     if (!buyer.valid) problems.push(`支付买家数无法解析：${buyer.raw ?? "空值"}`);
     if (boardType === "NEW_PRODUCT_TRAFFIC" && !cart.valid) problems.push(`加购人数无法解析：${cart.raw ?? "空值"}`);
@@ -169,7 +171,7 @@ export async function parseImportWorkbook(filePath: string): Promise<ImportParse
       shopName: cellText(read(row, "店铺名称")) || null, shopType: cellText(read(row, "店铺类型")) || null,
       imageUrl: cellText(read(row, "商品图片链接")) || null,
       weekStart: period.start, weekEnd: period.end, rawPeriod: period.raw, categoryName,
-      categoryLevel1: category!.level1, categoryLevel2: category!.level2,
+      categoryLevel1: category!.level1, categoryLevel2: category!.level2, categoryLevel3: category!.level3,
       rank: rankText && Number.isFinite(rankNumber) ? rankNumber : null,
       trend: cellText(read(row, "趋势")) || null,
       visitor, buyer, cart, productKeyword, exportTime: parseExportTime(read(row, "导出时间")),

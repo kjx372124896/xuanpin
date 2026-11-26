@@ -20,12 +20,12 @@ export class ImportsController {
 
   @CanImport()
   @Post("preview")
-  @UseInterceptors(FilesInterceptor("files", 100, {
+  @UseInterceptors(FilesInterceptor("files", 400, {
     storage: diskStorage({
       destination: (_req, _file, callback) => callback(null, getUploadRoot()),
       filename: (_req, file, callback) => callback(null, `${Date.now()}-${Math.random().toString(16).slice(2)}${path.extname(file.originalname).toLowerCase()}`),
     }),
-    limits: { fileSize: 50 * 1024 * 1024, files: 100 },
+    limits: { fileSize: 50 * 1024 * 1024, files: 400 },
     fileFilter: (_req, file, callback) => {
       if (file.originalname.startsWith("~$")) return callback(new BadRequestException("Excel 临时锁定文件不能导入。"), false);
       if (path.extname(file.originalname).toLowerCase() !== ".xlsx") return callback(new BadRequestException("目前仅支持 .xlsx 文件。"), false);

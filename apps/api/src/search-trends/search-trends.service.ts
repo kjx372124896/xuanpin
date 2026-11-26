@@ -9,6 +9,7 @@ type SearchTrendFilters = {
   category?: string | string[];
   categoryLevel1?: string | string[];
   categoryLevel2?: string | string[];
+  categoryLevel3?: string | string[];
   searchTermType?: string | string[];
   boardType?: string | string[];
   keyword?: string;
@@ -59,6 +60,9 @@ function identityOf(value: SearchTermIdentity): SearchTermIdentity {
 type SearchGroupRow = {
   searchTerm: string;
   categoryName: string;
+  categoryLevel1: string;
+  categoryLevel2: string;
+  categoryLevel3: string;
   classificationName: string | null;
   searchTermType: string;
   boardType: string;
@@ -83,7 +87,7 @@ type SearchGroupQueryRow = Omit<SearchGroupRow, "searchTerm"> & {
 
 type SearchTrendOptionsResult = {
   categories: string[];
-  categoryLevels: Array<{ categoryLevel1: string; categoryLevel2: string }>;
+  categoryLevels: Array<{ categoryLevel1: string; categoryLevel2: string; categoryLevel3: string }>;
   searchTermTypes: string[];
   boardTypes: string[];
   latestDate: string | null;
@@ -197,9 +201,9 @@ export class SearchTrendsService {
     const request = (async (): Promise<SearchTrendOptionsResult> => {
       const [categories, termTypes, boardTypes, latest] = await Promise.all([
         this.prisma.searchTermHistory.findMany({
-          distinct: ["categoryName", "categoryLevel1", "categoryLevel2"],
-          select: { categoryName: true, categoryLevel1: true, categoryLevel2: true },
-          orderBy: [{ categoryLevel1: "asc" }, { categoryLevel2: "asc" }, { categoryName: "asc" }],
+          distinct: ["categoryName", "categoryLevel1", "categoryLevel2", "categoryLevel3"],
+          select: { categoryName: true, categoryLevel1: true, categoryLevel2: true, categoryLevel3: true },
+          orderBy: [{ categoryLevel1: "asc" }, { categoryLevel2: "asc" }, { categoryLevel3: "asc" }, { categoryName: "asc" }],
         }),
         this.prisma.searchTermHistory.findMany({ distinct: ["searchTermType"], select: { searchTermType: true }, orderBy: { searchTermType: "asc" } }),
         this.prisma.searchTermHistory.findMany({ distinct: ["boardType"], select: { boardType: true }, orderBy: { boardType: "asc" } }),
@@ -207,8 +211,8 @@ export class SearchTrendsService {
       ]);
       const value = {
         categories: categories.map((item) => item.categoryName),
-        categoryLevels: [...new Map(categories.map(({ categoryLevel1, categoryLevel2 }) => [
-          JSON.stringify([categoryLevel1, categoryLevel2]), { categoryLevel1, categoryLevel2 },
+        categoryLevels: [...new Map(categories.map(({ categoryLevel1, categoryLevel2, categoryLevel3 }) => [
+          JSON.stringify([categoryLevel1, categoryLevel2, categoryLevel3]), { categoryLevel1, categoryLevel2, categoryLevel3 },
         ])).values()],
         searchTermTypes: termTypes.map((item) => item.searchTermType),
         boardTypes: boardTypes.map((item) => item.boardType),
@@ -278,6 +282,7 @@ export class SearchTrendsService {
     const categories = parseList(filters.category);
     const categoryLevel1 = parseList(filters.categoryLevel1);
     const categoryLevel2 = parseList(filters.categoryLevel2);
+    const categoryLevel3 = parseList(filters.categoryLevel3);
     const termTypes = parseList(filters.searchTermType);
     const boardTypes = parseList(filters.boardType);
     const keyword = filters.keyword?.trim();
@@ -290,6 +295,7 @@ export class SearchTrendsService {
     if (categories.length) commonConditions.push(Prisma.sql`"类目" IN (${Prisma.join(categories)})`);
     if (categoryLevel1.length) commonConditions.push(Prisma.sql`"一级类目" IN (${Prisma.join(categoryLevel1)})`);
     if (categoryLevel2.length) commonConditions.push(Prisma.sql`"二级类目" IN (${Prisma.join(categoryLevel2)})`);
+    if (categoryLevel3.length) commonConditions.push(Prisma.sql`"三级类目" IN (${Prisma.join(categoryLevel3)})`);
     if (termTypes.length) commonConditions.push(Prisma.sql`"搜索词类型" IN (${Prisma.join(termTypes)})`);
     if (boardTypes.length) commonConditions.push(Prisma.sql`"搜索榜单类型" IN (${Prisma.join(boardTypes)})`);
     if (keyword) commonConditions.push(Prisma.sql`"搜索词" ILIKE ${"%" + keyword + "%"}`);
@@ -350,6 +356,7 @@ export class SearchTrendsService {
     const cte = Prisma.sql`
       WITH filtered AS (
         SELECT "搜索词", "类目", "分类名称", "搜索词类型", "搜索榜单类型", "统计维度",
+               "一级类目", "二级类目", "三级类目",
                "统计日期", "排名", "搜索人数原值", "搜索人数下限", "搜索人数上限", "搜索人数中值",
                "导出时间", "导入时间"
         FROM "搜索词日历史表"
@@ -358,6 +365,7 @@ export class SearchTrendsService {
       latest AS (
         SELECT DISTINCT ON ("搜索词", "类目", "搜索词类型", "搜索榜单类型", "统计维度")
                "搜索词", "类目", "分类名称", "搜索词类型", "搜索榜单类型", "统计维度",
+               "一级类目", "二级类目", "三级类目",
                "统计日期" AS "最新日期", "排名", "搜索人数原值", "搜索人数下限", "搜索人数上限", "搜索人数中值"
         FROM filtered
         ORDER BY "搜索词", "类目", "搜索词类型", "搜索榜单类型", "统计维度",
@@ -418,6 +426,9 @@ export class SearchTrendsService {
       SELECT
         page_rows."搜索词" AS "searchTerm",
         page_rows."类目" AS "categoryName",
+        page_rows."一级类目" AS "categoryLevel1",
+        page_rows."二级类目" AS "categoryLevel2",
+        page_rows."三级类目" AS "categoryLevel3",
         page_rows."分类名称" AS "classificationName",
         page_rows."搜索词类型" AS "searchTermType",
         page_rows."搜索榜单类型" AS "boardType",
@@ -554,6 +565,9 @@ export class SearchTrendsService {
         } : {}),
         searchTerm: group.searchTerm,
         categoryName: group.categoryName,
+        categoryLevel1: group.categoryLevel1,
+        categoryLevel2: group.categoryLevel2,
+        categoryLevel3: group.categoryLevel3,
         classificationName: group.classificationName,
         searchTermType: group.searchTermType,
         boardType: group.boardType,

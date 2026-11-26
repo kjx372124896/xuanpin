@@ -75,6 +75,7 @@ model Product {
   latestCategory       String?             @map("最新类目名称") @db.VarChar(255)
   latestCategoryLevel1 String?             @map("最新一级类目") @db.VarChar(255)
   latestCategoryLevel2 String?             @map("最新二级类目") @db.VarChar(255)
+  latestCategoryLevel3 String?             @map("最新三级类目") @db.VarChar(255)
   firstWeekStart       DateTime?           @map("首次上榜日期") @db.Date
   latestWeekStart      DateTime?           @map("最近上榜日期") @db.Date
   latestWeekEnd        DateTime?           @map("最近上榜结束日期") @db.Date
@@ -116,7 +117,7 @@ model Product {
   @@index([shopName])
   @@index([listingDate])
   @@index([latestCategory, latestWeekStart])
-  @@index([latestCategoryLevel1, latestCategoryLevel2])
+  @@index([latestCategoryLevel1, latestCategoryLevel2, latestCategoryLevel3], map: "商品主表_类目三级索引")
   @@index([aiMetricsFetchedAt])
   @@map("商品主表")
 }
@@ -131,6 +132,7 @@ model ProductHistory {
   categoryName    String      @map("类目名称") @db.VarChar(255)
   categoryLevel1  String      @map("一级类目") @db.VarChar(255)
   categoryLevel2  String      @map("二级类目") @db.VarChar(255)
+  categoryLevel3  String      @default("无三级类目") @map("三级类目") @db.VarChar(255)
   rank            Int?        @map("行业排名")
   trend           String?     @map("趋势") @db.VarChar(80)
   visitorRaw      String?     @map("访客数原值") @db.VarChar(100)
@@ -157,7 +159,7 @@ model ProductHistory {
   @@unique([boardType, productId, weekStart, categoryName], map: "商品上榜历史_榜单业务唯一键")
   @@index([productId, weekStart])
   @@index([boardType, weekStart, categoryName])
-  @@index([categoryLevel1, categoryLevel2])
+  @@index([categoryLevel1, categoryLevel2, categoryLevel3], map: "商品历史_类目三级索引")
   @@index([weekStart, categoryName, rank])
   @@map("商品上榜历史表")
 }
@@ -181,6 +183,7 @@ model ProductBoardStats {
   latestCategory       String?   @map("最新类目名称") @db.VarChar(255)
   latestCategoryLevel1 String?   @map("最新一级类目") @db.VarChar(255)
   latestCategoryLevel2 String?   @map("最新二级类目") @db.VarChar(255)
+  latestCategoryLevel3 String?   @map("最新三级类目") @db.VarChar(255)
   firstWeekStart       DateTime? @map("首次上榜日期") @db.Date
   latestWeekStart      DateTime? @map("最近上榜日期") @db.Date
   latestWeekEnd        DateTime? @map("最近上榜结束日期") @db.Date
@@ -202,7 +205,7 @@ model ProductBoardStats {
 
   @@id([productId, boardType], map: "商品榜单统计表_pkey")
   @@index([boardType, latestWeekStart])
-  @@index([boardType, latestCategoryLevel1, latestCategoryLevel2])
+  @@index([boardType, latestCategoryLevel1, latestCategoryLevel2, latestCategoryLevel3], map: "商品榜单统计_类目三级索引")
   @@index([boardType, latestBuyerMedian])
   @@map("商品榜单统计表")
 }
@@ -212,13 +215,14 @@ model Category {
   categoryName      String   @unique @map("类目名称") @db.VarChar(255)
   categoryLevel1    String   @map("一级类目") @db.VarChar(255)
   categoryLevel2    String?  @map("二级类目") @db.VarChar(255)
+  categoryLevel3    String?  @map("三级类目") @db.VarChar(255)
   responsibleUserId String?  @map("负责人ID") @db.VarChar(30)
   enabled           Boolean  @default(true) @map("是否启用")
   createdAt         DateTime @default(now()) @map("创建时间")
   updatedAt         DateTime @updatedAt @map("更新时间")
   responsibleUser   User?    @relation("CategoryResponsibleUser", fields: [responsibleUserId], references: [id], onDelete: SetNull)
 
-  @@index([categoryLevel1, categoryLevel2])
+  @@index([categoryLevel1, categoryLevel2, categoryLevel3], map: "类目表_类目三级索引")
   @@index([responsibleUserId])
   @@map("类目表")
 }
@@ -285,6 +289,7 @@ model SearchTermHistory {
   categoryName          String      @map("类目") @db.VarChar(255)
   categoryLevel1        String      @map("一级类目") @db.VarChar(255)
   categoryLevel2        String      @map("二级类目") @db.VarChar(255)
+  categoryLevel3        String      @default("无三级类目") @map("三级类目") @db.VarChar(255)
   classificationName    String?     @map("分类名称") @db.VarChar(255)
   searchTermType        String      @map("搜索词类型") @db.VarChar(80)
   boardType             String      @map("搜索榜单类型") @db.VarChar(80)
@@ -309,8 +314,19 @@ model SearchTermHistory {
   @@index([searchTerm, searchDate])
   @@index([searchTermType, boardType, searchDate])
   @@index([searchPeopleMedian])
-  @@index([categoryLevel1, categoryLevel2, searchDate], map: "搜索词日历史_类目层级日期索引")
+  @@index([categoryLevel1, categoryLevel2, categoryLevel3, searchDate], map: "搜索词日历史_类目层级日期索引")
   @@map("搜索词日历史表")
+}
+
+model CategoryPathMigrationIssue {
+  sourceTable    String   @map("来源表") @db.VarChar(80)
+  sourceRecordId String   @map("来源记录ID") @db.VarChar(30)
+  rawPath        String   @map("原始类目路径") @db.VarChar(255)
+  issueType      String   @map("异常类型") @db.VarChar(80)
+  createdAt      DateTime @default(now()) @map("记录时间")
+
+  @@id([sourceTable, sourceRecordId], map: "类目路径迁移异常表_pkey")
+  @@map("类目路径迁移异常表")
 }
 
 model User {

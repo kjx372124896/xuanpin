@@ -101,6 +101,7 @@ a { color: #315efb; }
 .import-summary-grid > div { background: #f7f9fc; border: 1px solid #edf0f5; border-radius: 10px; padding: 13px 15px; display: flex; flex-direction: column; gap: 5px; }
 .import-summary-grid span { font-size: 11px; color: #8c97a9; }
 .import-summary-grid strong { font-size: 20px; color: #293750; }
+.import-preview-files .ant-table-body { height: 320px; overscroll-behavior: contain; }
 .text-danger { color: #cf3f48 !important; }
 .section-alert { margin-top: 14px; }
 .subsection-heading { font-size: 13px; color: #4d5b72; font-weight: 600; margin: 18px 0 10px; }
@@ -232,13 +233,13 @@ a { color: #315efb; }
 /* 查询/重置按钮放在第二行最后一个筛选项后面；占用1个固定列，不改变按钮本身尺寸。 */
 /*
  * ⑤ 两排筛选项位置（本次调整）
- * 店铺类型：固定在第一排第5列；上架日期范围控件固定在第6列，紧跟店铺类型。
+ * 三级类目：固定在第一排第5列；上架日期范围控件固定在第6列，紧跟三级类目。
  * 第二排依次放置数值筛选、数据状态、收藏范围和操作按钮。
  * filter-field-second-row：上榜周数及其后面的筛选项统一固定在第二排，
  * 按页面中的先后顺序从第1列排到第6列。
  * 这里只控制网格位置，不改变每列210px宽度、标签/输入框尺寸和项目间距。
  */
-.filter-card-compact .filter-field-shop-type { grid-column: 5; grid-row: 1; }
+.filter-card-compact .filter-field-category-level3 { grid-column: 5; grid-row: 1; }
 .filter-card-compact .filter-field-listing-date { grid-column: 6; grid-row: 1; }
 .filter-card-compact .filter-field-second-row { grid-row: 2; }
 
@@ -300,11 +301,13 @@ a { color: #315efb; }
 .search-trend-filter-grid .filter-field > .ant-input,
 .search-trend-filter-grid .filter-field > .ant-input-affix-wrapper,
 .search-trend-filter-grid .filter-field > .ant-picker { width: 100%; min-width: 0; justify-self: stretch; }
-.search-trend-filter-grid .filter-field-listing-date { grid-column: 1 / span 2; grid-row: 2; }
-.search-trend-filter-grid .search-trend-field-comparison-mode { grid-column: 3; grid-row: 2; }
-.search-trend-filter-grid .search-trend-field-favorites { grid-column: 4; grid-row: 2; }
+.search-trend-filter-grid .search-trend-field-date { grid-column: 6; grid-row: 1; }
+.search-trend-filter-grid .search-trend-field-keyword { grid-column: 1; grid-row: 2; }
+.search-trend-filter-grid .search-trend-field-comparison-mode { grid-column: 2; grid-row: 2; }
+.search-trend-filter-grid .search-trend-field-favorites { grid-column: 3; grid-row: 2; }
 .search-trend-filter-grid .search-trend-field-favorites .ant-checkbox-wrapper { font-size: 11px; }
-.search-trend-filter-grid .search-trend-field-min-growth { grid-column: 5; grid-row: 2; }
+.search-trend-filter-grid .search-trend-field-min-growth { grid-column: 4; grid-row: 2; }
+.search-trend-filter-grid .search-trend-field-people { grid-column: 5; grid-row: 2; }
 .search-trend-filter-grid .filter-range-control { display: grid; grid-template-columns: minmax(0,1fr) 10px minmax(0,1fr); align-items: center; gap: 5px; width: 100%; min-width: 0; }
 .search-trend-filter-grid .filter-range-control .ant-input-number { width: 100%; min-width: 0; }
 .search-trend-filter-actions { grid-column: 6; grid-row: 2; display: flex; min-height: 34px; align-items: center; justify-content: flex-end; gap: 6px; white-space: nowrap; }
@@ -338,7 +341,7 @@ a { color: #315efb; }
 .search-trends-table-card .search-term-cell .ant-typography { font-size: 12px; line-height: 1.35; }
 .latest-rank-cell { display: flex; min-width: 0; flex-direction: column; align-items: center; gap: 3px; }
 .latest-rank-value { color: #25334a; font-size: 14px; line-height: 1.2; font-variant-numeric: tabular-nums; }
-.latest-rank-meta { display: flex; min-width: 0; max-width: 100%; align-items: center; justify-content: center; gap: 5px; }
+.latest-rank-meta { display: flex; flex-direction: column; min-width: 0; width: 100%; align-items: center; justify-content: center; gap: 3px; }
 .latest-rank-category { min-width: 0; max-width: 100px; font-size: 10px; line-height: 1.3; }
 .search-trends-table-card .latest-rank-type.ant-tag { max-width: 65px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding-inline: 5px; font-size: 10px; line-height: 16px; }
 .search-trends-table-card .ant-tag { margin-inline-end: 0; padding-inline: 6px; font-size: 11px; line-height: 18px; }
@@ -379,7 +382,7 @@ a { color: #315efb; }
    * 屏幕较窄时筛选卡片可横向滚动，不会把标签和输入框压扁或挤到一起。
    */
   .filter-card-compact .filter-grid { grid-template-columns: repeat(5,210px) 270px; justify-content: space-between; min-width: 1380px; }
-  .filter-card-compact .filter-field:not(.filter-field-range):not(.filter-field-shop-type):not(.filter-field-listing-date),
+  .filter-card-compact .filter-field:not(.filter-field-range):not(.filter-field-category-level3):not(.filter-field-listing-date),
   .filter-card-compact .filter-actions { grid-column: span 1 !important; }
   .search-trend-filter-grid .search-trend-filter-actions { grid-column: 6 !important; grid-row: 2; }
   .filter-card-compact .filter-field-range { grid-column: span 1 !important; }
@@ -398,6 +401,7 @@ a { color: #315efb; }
 .category-register-table .category-parent-row > td { background: #f8faff !important; }
 .category-register-table .category-parent-row .ant-table-cell:first-child { color: #263b64; }
 .category-register-table .category-child-row > td { background: #fff; }
+.category-register-table .category-grandchild-row > td { background: #fbfcff; color: #526078; }
 .category-register-table .ant-tag { margin-inline-end: 0; font-size: 10px; }
 .category-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 18px; margin-top: 12px; color: #7d899d; font-size: 11px; }
 .category-legend > span { display: inline-flex; align-items: center; gap: 5px; }

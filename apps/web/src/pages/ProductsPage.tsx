@@ -13,7 +13,7 @@ interface Filters {
   keyword?: string;
   categoryLevel1?: string[];
   categoryLevel2?: string[];
-  shopType?: string;
+  categoryLevel3?: string[];
   listingDateFrom?: string;
   listingDateTo?: string;
   latestWeekStarts?: string[];
@@ -26,7 +26,7 @@ interface Filters {
   aiMetricsStatus?: "NOT_FETCHED" | "FETCHED";
   favoritesOnly?: boolean;
 }
-interface CategoryOptions { level1: string[]; level2: string[] }
+interface CategoryOptions { level1: string[]; level2: string[]; level3: string[] }
 interface PeriodOptions { periods: string[] }
 interface TeamFavoriteProduct extends ProductListItem {
   favoriteCount: number;
@@ -196,6 +196,7 @@ export function ProductsPage() {
     ...filters,
     categoryLevel1: filters.categoryLevel1?.join(",") || undefined,
     categoryLevel2: filters.categoryLevel2?.join(",") || undefined,
+    categoryLevel3: filters.categoryLevel3?.join(",") || undefined,
     latestWeekStarts: filters.latestWeekStarts?.join(",") || undefined,
   }), [page, pageSize, cursor, boardType, filters]);
   const productsQuery = useQuery({
@@ -210,9 +211,13 @@ export function ProductsPage() {
     enabled: isAdmin && teamFavoritesMode,
   });
   const categoriesQuery = useQuery({
-    queryKey: ["categories", boardType, draft.categoryLevel1],
+    queryKey: ["categories", boardType, draft.categoryLevel1, draft.categoryLevel2],
     queryFn: async () => (await api.get<CategoryOptions>("/products/categories", {
-      params: { boardType, ...(draft.categoryLevel1?.length ? { level1: draft.categoryLevel1.join(",") } : {}) },
+      params: {
+        boardType,
+        ...(draft.categoryLevel1?.length ? { level1: draft.categoryLevel1.join(",") } : {}),
+        ...(draft.categoryLevel2?.length ? { level2: draft.categoryLevel2.join(",") } : {}),
+      },
     })).data,
   });
   const periodsQuery = useQuery({
@@ -271,7 +276,7 @@ export function ProductsPage() {
             fallback="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Crect width='100%25' height='100%25' fill='%23edf1f7'/%3E%3C/svg%3E"
           />
           <div className="product-cell-copy">
-            <div className="product-category">{[item.latestCategoryLevel1, item.latestCategoryLevel2].filter(Boolean).join(" / ") || "未分类"}</div>
+            <div className="product-category">{[item.latestCategoryLevel1, item.latestCategoryLevel2, item.latestCategoryLevel3].filter(Boolean).join(" / ") || "未分类"}</div>
             <Button type="link" className="product-name-link" onClick={() => setSelectedProductId(item.productId)}>{item.productName}</Button>
             <div className="product-meta-row">
               <Typography.Text type="secondary" className="product-id">ID：{item.productId}</Typography.Text>
@@ -411,15 +416,15 @@ export function ProductsPage() {
           </div>
           <div className="filter-field">
             <label htmlFor="filter-category-level1">一级类目</label>
-            <Select id="filter-category-level1" mode="multiple" allowClear showSearch optionFilterProp="label" maxTagCount="responsive" value={draft.categoryLevel1 ?? []} onChange={(value) => setDraft((prev) => ({ ...prev, categoryLevel1: value, categoryLevel2: [] }))} placeholder="全部（可多选）" options={(categoriesQuery.data?.level1 ?? []).map((value) => ({ label: value, value }))} />
+            <Select id="filter-category-level1" mode="multiple" allowClear showSearch optionFilterProp="label" maxTagCount="responsive" value={draft.categoryLevel1 ?? []} onChange={(value) => setDraft((prev) => ({ ...prev, categoryLevel1: value, categoryLevel2: [], categoryLevel3: [] }))} placeholder="全部（可多选）" options={(categoriesQuery.data?.level1 ?? []).map((value) => ({ label: value, value }))} />
           </div>
           <div className="filter-field">
             <label htmlFor="filter-category-level2">二级类目</label>
-            <Select id="filter-category-level2" mode="multiple" allowClear showSearch optionFilterProp="label" maxTagCount="responsive" disabled={!draft.categoryLevel1?.length} value={draft.categoryLevel2 ?? []} onChange={(value) => setDraft((prev) => ({ ...prev, categoryLevel2: value }))} placeholder="全部（可多选）" options={(categoriesQuery.data?.level2 ?? []).map((value) => ({ label: value, value }))} />
+            <Select id="filter-category-level2" mode="multiple" allowClear showSearch optionFilterProp="label" maxTagCount="responsive" disabled={!draft.categoryLevel1?.length} value={draft.categoryLevel2 ?? []} onChange={(value) => setDraft((prev) => ({ ...prev, categoryLevel2: value, categoryLevel3: [] }))} placeholder="全部（可多选）" options={(categoriesQuery.data?.level2 ?? []).map((value) => ({ label: value, value }))} />
           </div>
-          <div className="filter-field filter-field-shop-type">
-            <label htmlFor="filter-shop-type">店铺类型</label>
-            <Select id="filter-shop-type" allowClear value={draft.shopType} onChange={(value) => setDraft((prev) => ({ ...prev, shopType: value }))} placeholder="全部" options={[{ label: "淘宝", value: "淘宝" }, { label: "天猫", value: "天猫" }]} />
+          <div className="filter-field filter-field-category-level3">
+            <label htmlFor="filter-category-level3">三级类目</label>
+            <Select id="filter-category-level3" mode="multiple" allowClear showSearch optionFilterProp="label" maxTagCount="responsive" disabled={!draft.categoryLevel1?.length || !draft.categoryLevel2?.length} value={draft.categoryLevel3 ?? []} onChange={(value) => setDraft((prev) => ({ ...prev, categoryLevel3: value }))} placeholder="全部（可多选）" options={(categoriesQuery.data?.level3 ?? []).map((value) => ({ label: value, value }))} />
           </div>
           <div className="filter-field filter-field-listing-date">
             <label htmlFor="filter-listing-date">上架日期</label>

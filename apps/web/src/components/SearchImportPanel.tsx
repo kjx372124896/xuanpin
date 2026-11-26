@@ -29,6 +29,7 @@ interface SearchPreviewRow {
   categoryName: string;
   categoryLevel1: string;
   categoryLevel2: string;
+  categoryLevel3: string;
   classificationName: string | null;
   searchTermType: string;
   boardType: string;
@@ -135,11 +136,15 @@ export function SearchImportPanel() {
       message.warning("请先选择搜索榜单 Excel 文件。");
       return;
     }
+    if (files.length > 400) {
+      message.warning("单批最多上传 400 个 Excel 文件，请分批上传。");
+      return;
+    }
     setUploading(true);
     const formData = new FormData();
     files.forEach((file) => formData.append("files", file));
     try {
-      const result = (await api.post<SearchPreviewResult>("/imports/preview?kind=SEARCH_BOARD", formData)).data;
+      const result = (await api.post<SearchPreviewResult>("/imports/preview?kind=SEARCH_BOARD", formData, { timeout: 720_000 })).data;
       setPreview(result);
       setBatchId(result.batchId);
       message.success("搜索榜单解析完成：" + result.validRows.toLocaleString() + " 行有效数据");
@@ -194,6 +199,7 @@ export function SearchImportPanel() {
     { title: "原始类目", dataIndex: "categoryName", key: "category", width: 180 },
     { title: "一级类目", dataIndex: "categoryLevel1", key: "categoryLevel1", width: 130 },
     { title: "二级类目", dataIndex: "categoryLevel2", key: "categoryLevel2", width: 150 },
+    { title: "三级类目", dataIndex: "categoryLevel3", key: "categoryLevel3", width: 150 },
     { title: "搜索词类型", dataIndex: "searchTermType", key: "termType", width: 100 },
     { title: "榜单类型", dataIndex: "boardType", key: "boardType", width: 100 },
     { title: "日期", dataIndex: "searchDate", key: "date", width: 110 },
@@ -216,7 +222,7 @@ export function SearchImportPanel() {
         <div className="section-heading">
           <div>
             <Typography.Title level={4}>上传搜索榜单文件</Typography.Title>
-            <Typography.Text type="secondary">支持同时选择多份 .xlsx 文件或整个文件夹，单文件最大 50 MB，最多 100 份。</Typography.Text>
+            <Typography.Text type="secondary">支持同时选择多份 .xlsx 文件或整个文件夹，单文件最大 50 MB，最多 400 份。</Typography.Text>
           </div>
           <Tag color="blue">日维度 · Excel .xlsx</Tag>
         </div>
@@ -260,7 +266,7 @@ export function SearchImportPanel() {
           <div><span>异常行</span><strong className={preview.errorRows ? "text-danger" : ""}>{preview.errorRows.toLocaleString()}</strong></div>
           <div><span>重复文件</span><strong>{preview.duplicateFiles}</strong></div>
         </div>
-        <Table rowKey="id" columns={fileColumns} dataSource={preview.files} pagination={false} size="small" scroll={{ x: 1200 }} />
+        <Table className="import-preview-files" rowKey="id" columns={fileColumns} dataSource={preview.files} pagination={false} size="small" scroll={{ x: 1200, y: 320 }} />
         {preview.files.some((file) => file.parseError) && <Alert type="error" showIcon message="部分文件无法解析" description={preview.files.filter((file) => file.parseError).map((file) => file.originalName + "：" + file.parseError).join("；")} className="section-alert" />}
         {preview.errorRows > 0 && <Alert type="warning" showIcon message={"发现 " + preview.errorRows + " 行异常数据"} description="异常行不会写入数据库；其他通过校验的数据仍可正常导入。导入完成后可在批次详情中查看错误行号。" className="section-alert" />}
         {previewErrors.length > 0 && <Table rowKey={(row) => row.fileName + "-" + row.row} size="small" pagination={{ pageSize: 5 }} dataSource={previewErrors} columns={[

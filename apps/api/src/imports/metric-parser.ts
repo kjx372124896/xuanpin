@@ -10,9 +10,11 @@ export interface ParsedCategory {
   raw: string;
   level1: string;
   level2: string;
+  level3: string;
 }
 
 export const NO_SECOND_LEVEL_CATEGORY = "无二级类目";
+export const NO_THIRD_LEVEL_CATEGORY = "无三级类目";
 
 function parseNumber(value: string): number | null {
   const match = value.trim().replace(/,/g, "").match(/^([+-]?\d+(?:\.\d+)?)\s*(亿|万|千)?$/);
@@ -44,14 +46,23 @@ export function parseMetric(value: unknown): ParsedMetric {
 
 export function parseCategoryName(value: unknown): ParsedCategory | null {
   if (value === null || value === undefined) return null;
-  const raw = String(value).trim();
+  const source = String(value);
+  const raw = source.trim();
   if (!raw) return null;
-  const separator = raw.indexOf("/");
-  if (separator < 0) return { raw, level1: raw, level2: NO_SECOND_LEVEL_CATEGORY };
-  const level1 = raw.slice(0, separator).trim();
-  const level2 = raw.slice(separator + 1).trim() || NO_SECOND_LEVEL_CATEGORY;
-  if (!level1) return null;
-  return { raw, level1, level2 };
+  // cellText trims Excel cells before this parser runs. Preserve validation
+  // for a visibly empty first/last hierarchy segment after that trim.
+  if (/^\/\s+/.test(raw) || /\s+\/$/.test(raw) || /\s+\/\s+\/\s+/.test(raw)) return null;
+  // A slash is a hierarchy separator only when whitespace exists on both
+  // sides. Slashes inside a category label (for example, "杯子/水杯/水壶")
+  // are part of the label and must remain untouched.
+  const levels = source.split(/\s+\/\s+/).map((part) => part.trim());
+  if (levels.length > 3 || levels.some((part) => !part)) return null;
+  return {
+    raw,
+    level1: levels[0],
+    level2: levels[1] ?? NO_SECOND_LEVEL_CATEGORY,
+    level3: levels[2] ?? NO_THIRD_LEVEL_CATEGORY,
+  };
 }
 
 function parseDateToken(value: string): Date | null {

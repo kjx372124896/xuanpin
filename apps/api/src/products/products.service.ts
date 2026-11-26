@@ -15,6 +15,7 @@ type ProductListQuery = {
   keyword?: string;
   categoryLevel1?: string[];
   categoryLevel2?: string[];
+  categoryLevel3?: string[];
   shopType?: string;
   listingDateFrom?: string;
   listingDateTo?: string;
@@ -64,6 +65,7 @@ type ProductTrendHistoryRow = {
   categoryName: string;
   categoryLevel1: string;
   categoryLevel2: string;
+  categoryLevel3: string;
 };
 
 function normalizePeriodStarts(values?: string[]): string[] {
@@ -99,6 +101,7 @@ function mapProduct(stats: any, product: any = stats) {
     latestCategory: stats.latestCategory,
     latestCategoryLevel1: stats.latestCategoryLevel1,
     latestCategoryLevel2: stats.latestCategoryLevel2,
+    latestCategoryLevel3: stats.latestCategoryLevel3,
     latestWeekStart: stats.latestWeekStart?.toISOString() ?? null,
     latestWeekEnd: stats.latestWeekEnd?.toISOString() ?? null,
     latestRank: stats.latestRank,
@@ -122,11 +125,13 @@ function mapProduct(stats: any, product: any = stats) {
 }
 
 const NO_SECOND_LEVEL_CATEGORY = "无二级类目";
+const NO_THIRD_LEVEL_CATEGORY = "无三级类目";
 
 function compareHistoryRowsForDisplay<T extends {
   productId: string;
   weekStart: Date;
   categoryLevel2: string;
+  categoryLevel3: string;
   exportTime: Date | null;
   importedAt: Date;
   categoryName: string;
@@ -134,6 +139,7 @@ function compareHistoryRowsForDisplay<T extends {
   return a.productId.localeCompare(b.productId)
     || a.weekStart.getTime() - b.weekStart.getTime()
     || Number(a.categoryLevel2 === NO_SECOND_LEVEL_CATEGORY) - Number(b.categoryLevel2 === NO_SECOND_LEVEL_CATEGORY)
+    || Number(a.categoryLevel3 === NO_THIRD_LEVEL_CATEGORY) - Number(b.categoryLevel3 === NO_THIRD_LEVEL_CATEGORY)
     || (b.exportTime?.getTime() ?? 0) - (a.exportTime?.getTime() ?? 0)
     || b.importedAt.getTime() - a.importedAt.getTime()
     || a.categoryName.localeCompare(b.categoryName);
@@ -402,10 +408,12 @@ export class ProductsService {
           h."类目名称" AS "categoryName",
           h."一级类目" AS "categoryLevel1",
           h."二级类目" AS "categoryLevel2",
+          h."三级类目" AS "categoryLevel3",
           ROW_NUMBER() OVER (
             PARTITION BY h."商品ID", h."周开始日期"
             ORDER BY
               CASE WHEN h."二级类目" = ${NO_SECOND_LEVEL_CATEGORY} THEN 1 ELSE 0 END ASC,
+              CASE WHEN h."三级类目" = ${NO_THIRD_LEVEL_CATEGORY} THEN 1 ELSE 0 END ASC,
               h."导出时间" DESC NULLS LAST,
               h."导入时间" DESC,
               h."类目名称" ASC
@@ -416,13 +424,13 @@ export class ProductsService {
       ), ranked_weeks AS (
         SELECT
           "productId", "weekStart", "weekEnd", "buyerRaw", "buyerMin", "buyerMax", "buyerMedian",
-          "categoryName", "categoryLevel1", "categoryLevel2",
+          "categoryName", "categoryLevel1", "categoryLevel2", "categoryLevel3",
           ROW_NUMBER() OVER (PARTITION BY "productId" ORDER BY "weekStart" DESC) AS "weekRank"
         FROM ranked_categories
         WHERE "categoryRank" = 1
       )
       SELECT "productId", "weekStart", "weekEnd", "buyerRaw", "buyerMin", "buyerMax", "buyerMedian",
-        "categoryName", "categoryLevel1", "categoryLevel2"
+        "categoryName", "categoryLevel1", "categoryLevel2", "categoryLevel3"
       FROM ranked_weeks
       WHERE "weekRank" <= 12
       ORDER BY "productId" ASC, "weekStart" ASC
@@ -466,6 +474,7 @@ export class ProductsService {
     };
     if (query.categoryLevel1?.length) where.latestCategoryLevel1 = { in: query.categoryLevel1 };
     if (query.categoryLevel2?.length) where.latestCategoryLevel2 = { in: query.categoryLevel2 };
+    if (query.categoryLevel3?.length) where.latestCategoryLevel3 = { in: query.categoryLevel3 };
 
     const selectedPeriods = normalizePeriodStarts(query.latestWeekStarts);
     const hasConsecutiveWeekRange = query.consecutiveWeekCountMin !== undefined || query.consecutiveWeekCountMax !== undefined;
@@ -577,6 +586,7 @@ export class ProductsService {
             latestCategory: preferredLatestHistory.categoryName,
             latestCategoryLevel1: preferredLatestHistory.categoryLevel1,
             latestCategoryLevel2: preferredLatestHistory.categoryLevel2,
+            latestCategoryLevel3: preferredLatestHistory.categoryLevel3,
           } : {}),
           isFavorited: favoriteIds.has(item.productId),
           buyerTrend: (trendByProduct.get(item.productId) ?? []).slice(-12),
@@ -598,6 +608,7 @@ export class ProductsService {
     keyword?: string;
     categoryLevel1?: string[];
     categoryLevel2?: string[];
+    categoryLevel3?: string[];
     shopType?: string;
     listingDateFrom?: string;
     listingDateTo?: string;
@@ -629,6 +640,7 @@ export class ProductsService {
     }
     if (query.categoryLevel1?.length) where.latestCategoryLevel1 = { in: query.categoryLevel1 };
     if (query.categoryLevel2?.length) where.latestCategoryLevel2 = { in: query.categoryLevel2 };
+    if (query.categoryLevel3?.length) where.latestCategoryLevel3 = { in: query.categoryLevel3 };
     if (query.shopType) where.shopType = query.shopType;
     const selectedPeriods = normalizePeriodStarts(query.latestWeekStarts);
     const hasConsecutiveWeekRange = query.consecutiveWeekCountMin !== undefined || query.consecutiveWeekCountMax !== undefined;
@@ -747,6 +759,7 @@ export class ProductsService {
     memberKeyword?: string;
     categoryLevel1?: string[];
     categoryLevel2?: string[];
+    categoryLevel3?: string[];
     shopType?: string;
     listingDateFrom?: string;
     listingDateTo?: string;
@@ -789,6 +802,7 @@ export class ProductsService {
     }
     if (query.categoryLevel1?.length) where.latestCategoryLevel1 = { in: query.categoryLevel1 };
     if (query.categoryLevel2?.length) where.latestCategoryLevel2 = { in: query.categoryLevel2 };
+    if (query.categoryLevel3?.length) where.latestCategoryLevel3 = { in: query.categoryLevel3 };
     if (query.shopType) where.shopType = query.shopType;
     const selectedPeriods = normalizePeriodStarts(query.latestWeekStarts);
     const hasConsecutiveWeekRange = query.consecutiveWeekCountMin !== undefined || query.consecutiveWeekCountMax !== undefined;
@@ -956,6 +970,7 @@ export class ProductsService {
     };
     if (query.categoryLevel1?.length) where.latestCategoryLevel1 = { in: query.categoryLevel1 };
     if (query.categoryLevel2?.length) where.latestCategoryLevel2 = { in: query.categoryLevel2 };
+    if (query.categoryLevel3?.length) where.latestCategoryLevel3 = { in: query.categoryLevel3 };
     const selectedPeriods = normalizePeriodStarts(query.latestWeekStarts);
     const hasConsecutiveWeekRange = query.consecutiveWeekCountMin !== undefined || query.consecutiveWeekCountMax !== undefined;
     if (query.latestWeekStarts?.length) {
@@ -1071,6 +1086,7 @@ export class ProductsService {
             latestCategory: preferredLatestHistory.categoryName,
             latestCategoryLevel1: preferredLatestHistory.categoryLevel1,
             latestCategoryLevel2: preferredLatestHistory.categoryLevel2,
+            latestCategoryLevel3: preferredLatestHistory.categoryLevel3,
           } : {}),
           isFavorited: adminFavoriteIds.has(item.productId),
           buyerTrend: (trendByProduct.get(item.productId) ?? []).slice(-12),
@@ -1104,17 +1120,25 @@ export class ProductsService {
     return { periods: rows.map((row) => row.weekStart.toISOString().slice(0, 10)) };
   }
 
-  async categories(level1?: string[], boardType: "NEW_PRODUCT_TRAFFIC" | "TRANSACTION_GROWTH" = "NEW_PRODUCT_TRAFFIC") {
+  async categories(
+    level1?: string[],
+    level2?: string[],
+    boardType: "NEW_PRODUCT_TRAFFIC" | "TRANSACTION_GROWTH" = "NEW_PRODUCT_TRAFFIC",
+  ) {
     const selectedLevel1 = [...new Set(level1 ?? [])].filter(Boolean);
+    const selectedLevel2 = [...new Set(level2 ?? [])].filter(Boolean);
     const rows = await this.prisma.productHistory.groupBy({
-      by: ["categoryLevel1", "categoryLevel2"],
+      by: ["categoryLevel1", "categoryLevel2", "categoryLevel3"],
       where: { boardType },
-      orderBy: [{ categoryLevel1: "asc" }, { categoryLevel2: "asc" }],
+      orderBy: [{ categoryLevel1: "asc" }, { categoryLevel2: "asc" }, { categoryLevel3: "asc" }],
     });
     return {
       level1: [...new Set(rows.map((row) => row.categoryLevel1))],
       level2: selectedLevel1.length
         ? [...new Set(rows.filter((row) => selectedLevel1.includes(row.categoryLevel1)).map((row) => row.categoryLevel2))]
+        : [],
+      level3: selectedLevel1.length && selectedLevel2.length
+        ? [...new Set(rows.filter((row) => selectedLevel1.includes(row.categoryLevel1) && selectedLevel2.includes(row.categoryLevel2)).map((row) => row.categoryLevel3))]
         : [],
     };
   }
@@ -1139,6 +1163,7 @@ export class ProductsService {
       categoryName: row.categoryName,
       categoryLevel1: row.categoryLevel1,
       categoryLevel2: row.categoryLevel2,
+      categoryLevel3: row.categoryLevel3,
       rank: row.rank,
       trend: row.trend,
       visitor: range(row.visitorRaw, row.visitorMin, row.visitorMax, row.visitorMedian),
@@ -1226,18 +1251,22 @@ export class ProductsService {
     return { productId, isFavorited: false };
   }
 
-  async categoriesLegacy(level1?: string[]) {
+  async categoriesLegacy(level1?: string[], level2?: string[]) {
     const selectedLevel1 = [...new Set(level1 ?? [])].filter(Boolean);
+    const selectedLevel2 = [...new Set(level2 ?? [])].filter(Boolean);
     const rows = await this.prisma.category.findMany({
-      // 一级类目选项必须始终完整返回；选中项只用于收窄二级类目选项。
+      // 一级类目始终完整返回；二级、三级选项按已选上级逐级收窄。
       where: { enabled: true },
-      orderBy: [{ categoryLevel1: "asc" }, { categoryLevel2: "asc" }],
-      select: { categoryLevel1: true, categoryLevel2: true },
+      orderBy: [{ categoryLevel1: "asc" }, { categoryLevel2: "asc" }, { categoryLevel3: "asc" }],
+      select: { categoryLevel1: true, categoryLevel2: true, categoryLevel3: true },
     });
     return {
       level1: [...new Set(rows.map((row) => row.categoryLevel1))],
       level2: selectedLevel1.length
         ? [...new Set(rows.filter((row) => selectedLevel1.includes(row.categoryLevel1)).map((row) => row.categoryLevel2).filter((value): value is string => Boolean(value)))]
+        : [],
+      level3: selectedLevel1.length && selectedLevel2.length
+        ? [...new Set(rows.filter((row) => selectedLevel1.includes(row.categoryLevel1) && row.categoryLevel2 !== null && selectedLevel2.includes(row.categoryLevel2)).map((row) => row.categoryLevel3).filter((value): value is string => Boolean(value)))]
         : [],
     };
   }
@@ -1255,6 +1284,7 @@ export class ProductsService {
       categoryName: row.categoryName,
       categoryLevel1: row.categoryLevel1,
       categoryLevel2: row.categoryLevel2,
+      categoryLevel3: row.categoryLevel3,
       rank: row.rank,
       trend: row.trend,
       visitor: range(row.visitorRaw, row.visitorMin, row.visitorMax, row.visitorMedian),

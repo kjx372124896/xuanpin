@@ -266,7 +266,7 @@ test("筛选选项请求并发合并，并在短缓存有效期内复用结果",
       findMany: async (args: { distinct?: string[] }) => {
         optionFindManyCalls += 1;
         const field = args.distinct?.[0];
-        if (field === "categoryName") return [{ categoryName: "厨房用品", categoryLevel1: "厨房用品", categoryLevel2: "无二级类目" }];
+        if (field === "categoryName") return [{ categoryName: "厨房用品", categoryLevel1: "厨房用品", categoryLevel2: "无二级类目", categoryLevel3: "无三级类目" }];
         if (field === "searchTermType") return [{ searchTermType: "核心词" }];
         return [{ boardType: "NEW_PRODUCT_TRAFFIC" }];
       },
@@ -283,7 +283,7 @@ test("筛选选项请求并发合并，并在短缓存有效期内复用结果",
   assert.deepEqual(first, second);
   assert.deepEqual(second, third);
   assert.deepEqual(first.categories, ["厨房用品"]);
-  assert.deepEqual(first.categoryLevels, [{ categoryLevel1: "厨房用品", categoryLevel2: "无二级类目" }]);
+  assert.deepEqual(first.categoryLevels, [{ categoryLevel1: "厨房用品", categoryLevel2: "无二级类目", categoryLevel3: "无三级类目" }]);
   assert.deepEqual(first.searchTermTypes, ["核心词"]);
   assert.deepEqual(first.boardTypes, ["NEW_PRODUCT_TRAFFIC"]);
   assert.equal(first.latestDate, "2026-10-31");
@@ -300,4 +300,14 @@ test("搜索趋势重查询最多并发执行两条，超出请求排队", async
   assert.equal(calls.rawQueries.length, 6);
   assert.equal(calls.maxActiveRawQueries, 2);
   assert.equal(calls.activeRawQueries, 0);
+});
+
+
+test("三级类目筛选在分页前通过 SQL 参数绑定", async () => {
+  const { prisma, calls } = createPrisma();
+  await new SearchTrendsService(prisma as never).list({ ...filters, categoryLevel3: ["衣柜/抽屉收纳"] });
+  const query = calls.rawQueries[0];
+  assert.match(query.sql, /"三级类目" IN/);
+  assert.ok(query.values.includes("衣柜/抽屉收纳"));
+  assert.equal(query.sql.includes("衣柜/抽屉收纳"), false);
 });

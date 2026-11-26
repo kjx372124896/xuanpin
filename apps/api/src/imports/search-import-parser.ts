@@ -12,6 +12,7 @@ export interface ParsedSearchImportRow {
   categoryName: string;
   categoryLevel1: string;
   categoryLevel2: string;
+  categoryLevel3: string;
   classificationName: string | null;
   searchTermType: string;
   boardType: string;
@@ -118,7 +119,7 @@ export async function parseSearchImportWorkbook(filePath: string): Promise<Searc
     if (!period) problems.push("日期范围格式错误：" + (periodRaw || "空值"));
     else if (dateKey(period.start) !== dateKey(period.end)) problems.push("日维度数据的日期范围必须是同一天");
     if (dimensionRaw !== "日") problems.push("暂不支持「" + (dimensionRaw || "空") + "」维度，仅支持日维度");
-    if (!category) problems.push("类目为空或一级类目无法识别");
+    if (!category) problems.push(categoryName ? "类目格式错误：最多支持三级，且各级名称不能为空" : "类目为空或一级类目无法识别");
     if (!termType) problems.push("搜索词类型为空");
     if (!boardType) problems.push("榜单类型为空");
 
@@ -141,6 +142,7 @@ export async function parseSearchImportWorkbook(filePath: string): Promise<Searc
       categoryName: category!.raw,
       categoryLevel1: category!.level1,
       categoryLevel2: category!.level2,
+      categoryLevel3: category!.level3,
       classificationName: cellText(read(row, "分类名称")) || null,
       searchTermType: termType,
       boardType,

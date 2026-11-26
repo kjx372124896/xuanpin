@@ -33,6 +33,7 @@ export interface ProductListItem {
   latestCategory: string | null;
   latestCategoryLevel1: string | null;
   latestCategoryLevel2: string | null;
+  latestCategoryLevel3: string | null;
   latestWeekStart: string | null;
   latestWeekEnd: string | null;
   latestRank: number | null;
@@ -69,6 +70,7 @@ export interface ProductHistoryItem {
   categoryName: string;
   categoryLevel1: string;
   categoryLevel2: string;
+  categoryLevel3: string;
   rank: number | null;
   trend: string | null;
   visitor: MetricRange;

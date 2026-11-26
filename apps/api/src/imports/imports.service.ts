@@ -14,6 +14,7 @@ import { BoundedWorkQueue } from "../common/bounded-work-queue";
 import { parseWorkbookFile } from "./workbook-worker";
 import { MAX_BATCH_ROWS } from "./workbook-limits";
 import { normalizeImportFilename } from "./import-filename";
+import { parseCategoryName, NO_THIRD_LEVEL_CATEGORY } from "./metric-parser";
 
 type UploadedFile = Express.Multer.File;
 type RowWithFile = { row: ParsedImportRow; fileId: string; fileName: string };
@@ -25,7 +26,8 @@ function historyData(item: RowWithFile): Prisma.ProductHistoryCreateManyInput {
   const { row, fileId, fileName } = item;
   return {
     productId: row.productId, boardType: row.boardType, weekStart: row.weekStart, weekEnd: row.weekEnd, rawPeriod: row.rawPeriod,
-    categoryName: row.categoryName, categoryLevel1: row.categoryLevel1, categoryLevel2: row.categoryLevel2,
+    categoryName: row.categoryName, categoryLevel1: row.categoryLevel1,
+    categoryLevel2: row.categoryLevel2, categoryLevel3: row.categoryLevel3,
     rank: row.rank, trend: row.trend,
     visitorRaw: row.visitor.raw, visitorMin: row.visitor.min, visitorMax: row.visitor.max, visitorMedian: row.visitor.median,
     buyerRaw: row.buyer.raw, buyerMin: row.buyer.min, buyerMax: row.buyer.max, buyerMedian: row.buyer.median,
@@ -47,6 +49,7 @@ function searchHistoryData(item: SearchRowWithFile): Prisma.SearchTermHistoryCre
     categoryName: row.categoryName,
     categoryLevel1: row.categoryLevel1,
     categoryLevel2: row.categoryLevel2,
+    categoryLevel3: row.categoryLevel3,
     classificationName: row.classificationName,
     searchTermType: row.searchTermType,
     boardType: row.boardType,
@@ -78,17 +81,27 @@ function parseProductImportFileMeta(value: string | null) {
   }
 }
 
-async function readProductPreviewRows(storagePath: string): Promise<ParsedImportRow[]> {
+export async function readProductPreviewRows(storagePath: string): Promise<ParsedImportRow[]> {
   const artifact = JSON.parse(await readFile(storagePath, "utf8")) as { version?: number; rows?: Array<Record<string, unknown>> };
   if (artifact.version !== 1 || !Array.isArray(artifact.rows)) {
     throw new Error("商品榜单预览归并文件格式无效，请重新上传并预览。");
   }
-  return artifact.rows.map((row) => ({
-    ...row,
-    weekStart: new Date(String(row.weekStart)),
-    weekEnd: new Date(String(row.weekEnd)),
-    exportTime: row.exportTime ? new Date(String(row.exportTime)) : null,
-  })) as unknown as ParsedImportRow[];
+  return artifact.rows.map((row) => {
+    const category = typeof row.categoryLevel3 === "string" ? null : parseCategoryName(row.categoryName);
+    return {
+      ...row,
+      ...(category ? {
+        categoryLevel1: category.level1,
+        categoryLevel2: category.level2,
+        categoryLevel3: category.level3,
+      } : {
+        categoryLevel3: typeof row.categoryLevel3 === "string" ? row.categoryLevel3 : NO_THIRD_LEVEL_CATEGORY,
+      }),
+      weekStart: new Date(String(row.weekStart)),
+      weekEnd: new Date(String(row.weekEnd)),
+      exportTime: row.exportTime ? new Date(String(row.exportTime)) : null,
+    };
+  }) as unknown as ParsedImportRow[];
 }
 
 @Injectable()
@@ -204,6 +217,7 @@ export class ImportsService implements OnModuleInit, OnModuleDestroy {
             categoryName: row.categoryName,
             categoryLevel1: row.categoryLevel1,
             categoryLevel2: row.categoryLevel2,
+            categoryLevel3: row.categoryLevel3,
             classificationName: row.classificationName,
             searchTermType: row.searchTermType,
             boardType: row.boardType,
@@ -338,7 +352,7 @@ export class ImportsService implements OnModuleInit, OnModuleDestroy {
     const previewRows = deduplicated.rows.slice(0, 20).map(({ row }) => ({
       boardType: row.boardType,
       productId: row.productId, productName: row.productName, categoryName: row.categoryName,
-      categoryLevel1: row.categoryLevel1, categoryLevel2: row.categoryLevel2,
+      categoryLevel1: row.categoryLevel1, categoryLevel2: row.categoryLevel2, categoryLevel3: row.categoryLevel3,
       weekStart: dayKey(row.weekStart), weekEnd: dayKey(row.weekEnd), rank: row.rank, visitor: row.visitor, buyer: row.buyer,
     }));
     await this.prisma.importBatch.update({
@@ -614,12 +628,13 @@ export class ImportsService implements OnModuleInit, OnModuleDestroy {
         await this.prisma.$executeRaw(Prisma.sql`
           WITH latest AS (
             SELECT DISTINCT ON (h."商品ID", h."榜单类型") h."商品ID", h."榜单类型", h."周开始日期", h."周结束日期", h."类目名称", h."行业排名",
-              h."一级类目", h."二级类目",
+              h."一级类目", h."二级类目", h."三级类目",
               h."访客数原值", h."访客数下限", h."访客数上限", h."访客数中值",
               h."支付买家数原值", h."支付买家数下限", h."支付买家数上限", h."支付买家数中值"
             FROM "商品上榜历史表" h WHERE h."商品ID" IN (${idsSql})
             ORDER BY h."商品ID", h."榜单类型", h."周开始日期" DESC,
               CASE WHEN h."二级类目" = '无二级类目' THEN 1 ELSE 0 END ASC,
+              CASE WHEN h."三级类目" = '无三级类目' THEN 1 ELSE 0 END ASC,
               h."导出时间" DESC NULLS LAST, h."导入时间" DESC, h."类目名称" ASC
           ),
           counts AS (
@@ -640,14 +655,14 @@ export class ImportsService implements OnModuleInit, OnModuleDestroy {
             FROM week_rows GROUP BY "商品ID", "榜单类型"
           )
           INSERT INTO "商品榜单统计表" (
-            "商品ID", "榜单类型", "最新类目名称", "最新一级类目", "最新二级类目",
+            "商品ID", "榜单类型", "最新类目名称", "最新一级类目", "最新二级类目", "最新三级类目",
             "首次上榜日期", "最近上榜日期", "最近上榜结束日期", "最近行业排名",
             "历史上榜周数", "历史记录条数", "连续上榜周数",
             "最新访客数原值", "最新访客数下限", "最新访客数上限", "最新访客数中值",
             "最新支付买家数原值", "最新支付买家数下限", "最新支付买家数上限", "最新支付买家数中值", "更新时间"
           )
           SELECT
-            l."商品ID", l."榜单类型", l."类目名称", l."一级类目", l."二级类目",
+            l."商品ID", l."榜单类型", l."类目名称", l."一级类目", l."二级类目", l."三级类目",
             c.first_week, l."周开始日期", l."周结束日期", l."行业排名",
             c.week_count, c.record_count, COALESCE(s.streak_count, 0),
             l."访客数原值", l."访客数下限", l."访客数上限", l."访客数中值",
@@ -659,6 +674,7 @@ export class ImportsService implements OnModuleInit, OnModuleDestroy {
             "最新类目名称" = EXCLUDED."最新类目名称",
             "最新一级类目" = EXCLUDED."最新一级类目",
             "最新二级类目" = EXCLUDED."最新二级类目",
+            "最新三级类目" = EXCLUDED."最新三级类目",
             "首次上榜日期" = EXCLUDED."首次上榜日期",
             "最近上榜日期" = EXCLUDED."最近上榜日期",
             "最近上榜结束日期" = EXCLUDED."最近上榜结束日期",
@@ -675,6 +691,27 @@ export class ImportsService implements OnModuleInit, OnModuleDestroy {
             "最新支付买家数上限" = EXCLUDED."最新支付买家数上限",
             "最新支付买家数中值" = EXCLUDED."最新支付买家数中值",
             "更新时间" = now()
+        `);
+
+        await this.prisma.$executeRaw(Prisma.sql`
+          WITH latest AS (
+            SELECT DISTINCT ON (h."商品ID")
+              h."商品ID", h."类目名称", h."一级类目", h."二级类目", h."三级类目"
+            FROM "商品上榜历史表" h
+            WHERE h."商品ID" IN (${idsSql})
+            ORDER BY h."商品ID", h."周开始日期" DESC,
+              CASE WHEN h."二级类目" = '无二级类目' THEN 1 ELSE 0 END ASC,
+              CASE WHEN h."三级类目" = '无三级类目' THEN 1 ELSE 0 END ASC,
+              h."导出时间" DESC NULLS LAST, h."导入时间" DESC, h."类目名称" ASC
+          )
+          UPDATE "商品主表" AS product
+          SET "最新类目名称" = latest."类目名称",
+              "最新一级类目" = latest."一级类目",
+              "最新二级类目" = latest."二级类目",
+              "最新三级类目" = latest."三级类目",
+              "更新时间" = now()
+          FROM latest
+          WHERE product."商品ID" = latest."商品ID"
         `);
       }
 

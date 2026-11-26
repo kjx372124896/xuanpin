@@ -38,6 +38,21 @@ interface CategoryChild {
   ownerName: string | null;
   inherited: boolean;
   weekCounts: WeekCount[];
+  weekProgress: WeekProgress[];
+  totalGrandchildren: number;
+  grandchildren: CategoryGrandchild[];
+}
+interface CategoryGrandchild {
+  id: string;
+  categoryLevel1: string;
+  categoryLevel2: string;
+  categoryLevel3: string;
+  responsibleUserId: string | null;
+  responsibleUserName: string | null;
+  ownerUserId: string | null;
+  ownerName: string | null;
+  inherited: boolean;
+  weekCounts: WeekCount[];
 }
 interface CategoryParent {
   id: string | null;
@@ -62,10 +77,12 @@ interface CategoriesOverview {
 interface CategoryTableRow {
   key: string;
   id: string | null;
+  level: 1 | 2 | 3;
   isParent: boolean;
   importStatus: "COMPLETE" | "INCOMPLETE";
   categoryLevel1: string;
   categoryLevel2: string | null;
+  categoryLevel3: string | null;
   responsibleUserId: string | null;
   ownerUserId: string | null;
   ownerName: string | null;
@@ -83,11 +100,13 @@ export function CategoriesPage() {
   const [activeTab, setActiveTab] = useState<"market" | "search">("market");
   const [mineOnly, setMineOnly] = useState(false);
   const [boardType, setBoardType] = useState<"NEW_PRODUCT_TRAFFIC" | "TRANSACTION_GROWTH">("NEW_PRODUCT_TRAFFIC");
+  const [searchTermType, setSearchTermType] = useState<"搜索词" | "核心词">("搜索词");
   const [statusFilter, setStatusFilter] = useState<"ALL" | "INCOMPLETE">("ALL");
   const [search, setSearch] = useState("");
   const [categoryModalOpen, setCategoryModalOpen] = useState(false);
-  const [categoryType, setCategoryType] = useState<"parent" | "child">("parent");
+  const [categoryType, setCategoryType] = useState<"parent" | "child" | "grandchild">("parent");
   const [form] = Form.useForm();
+  const selectedParentForForm = Form.useWatch("categoryLevel1", form) as string | undefined;
 
   const overviewQuery = useQuery({
     queryKey: ["categoriesOverview", boardType],
@@ -95,8 +114,8 @@ export function CategoriesPage() {
     staleTime: 30_000,
   });
   const searchOverviewQuery = useQuery({
-    queryKey: ["categoriesSearchOverview"],
-    queryFn: async () => (await api.get<CategoriesOverview>("/categories/search-overview")).data,
+    queryKey: ["categoriesSearchOverview", searchTermType],
+    queryFn: async () => (await api.get<CategoriesOverview>("/categories/search-overview", { params: { searchTermType } })).data,
     enabled: activeTab === "search",
     staleTime: 30_000,
   });
@@ -105,17 +124,17 @@ export function CategoriesPage() {
   const overviewLoading = isSearchTab ? searchOverviewQuery.isLoading : overviewQuery.isLoading;
   const overviewFetching = isSearchTab ? searchOverviewQuery.isFetching : overviewQuery.isFetching;
   const summary = useMemo(() => {
-    const categories = (overview?.categories ?? []).flatMap((parent) => parent.children.length
-      ? parent.children.map((child) => ({
-        complete: Boolean(overview?.periods.length) && child.weekCounts.length === overview!.periods.length &&
-          child.weekCounts.every((week) => isSearchTab ? (week.daysWithData ?? week.count) === 7 : week.count > 0),
-      }))
-      : [{
-        complete: Boolean(overview?.periods.length) && parent.weekProgress.length === overview!.periods.length &&
-          parent.weekProgress.every((week) => isSearchTab
-            ? (week.daysWithData ?? 0) === 7
-            : week.total > 0 && week.imported === week.total),
-      }]);
+    const categories = (overview?.categories ?? []).flatMap((parent) =>
+      parent.children.flatMap((child) => {
+        const leaves = child.grandchildren.length ? child.grandchildren : [child];
+        return leaves.map((leaf) => ({
+          complete: Boolean(overview?.periods.length) && leaf.weekCounts.length === overview!.periods.length &&
+            leaf.weekCounts.every((week) => isSearchTab
+              ? (week.daysWithData ?? week.count) === 7
+              : week.count > 0),
+        }));
+      }),
+    );
     const total = categories.length;
     const complete = categories.filter((item) => item.complete).length;
     return { total, complete, incomplete: total - complete, rate: total ? Math.round((complete / total) * 1000) / 10 : 0 };
@@ -150,62 +169,90 @@ export function CategoriesPage() {
   const tableRows = useMemo<CategoryTableRow[]>(() => {
     const keyword = search.trim().toLocaleLowerCase();
     const expectedWeeks = overview?.periods.length ?? 0;
+    const weekCountsComplete = (weeks: WeekCount[]) =>
+      expectedWeeks > 0 && weeks.length === expectedWeeks && weeks.every((week) =>
+        isSearchTab ? (week.daysWithData ?? week.count) === 7 : week.count > 0);
+    const progressComplete = (weeks: WeekProgress[]) =>
+      expectedWeeks > 0 && weeks.length === expectedWeeks && weeks.every((week) =>
+        week.total > 0 && week.imported === week.total);
+
     return (overview?.categories ?? []).flatMap((parent) => {
-      const childRows = parent.children
-        .filter((child) => !mineOnly || child.ownerUserId === user?.id)
-        .filter((child) => statusFilter !== "INCOMPLETE" ||
-          expectedWeeks === 0 || child.weekCounts.length !== expectedWeeks || child.weekCounts.some((week) =>
-            isSearchTab ? (week.daysWithData ?? week.count) !== 7 : week.count <= 0))
-        .filter((child) => !keyword ||
-          parent.categoryLevel1.toLocaleLowerCase().includes(keyword) ||
-          child.categoryLevel2.toLocaleLowerCase().includes(keyword))
-        .map((child) => ({
-          key: `child:${child.id}`,
+      const parentMatches = !keyword || parent.categoryLevel1.toLocaleLowerCase().includes(keyword);
+      const childRows = parent.children.flatMap((child) => {
+        const childMatches = child.categoryLevel2.toLocaleLowerCase().includes(keyword);
+        const grandchildren = child.grandchildren
+          .filter((grandchild) => !mineOnly || grandchild.ownerUserId === user?.id)
+          .filter((grandchild) => statusFilter !== "INCOMPLETE" || !weekCountsComplete(grandchild.weekCounts))
+          .filter((grandchild) => !keyword || parentMatches || childMatches || grandchild.categoryLevel3.toLocaleLowerCase().includes(keyword))
+          .map((grandchild) => ({
+            key: `grandchild:${grandchild.id}`,
+            id: grandchild.id,
+            level: 3 as const,
+            isParent: false,
+            importStatus: weekCountsComplete(grandchild.weekCounts) ? "COMPLETE" as const : "INCOMPLETE" as const,
+            categoryLevel1: "",
+            categoryLevel2: null,
+            categoryLevel3: grandchild.categoryLevel3,
+            responsibleUserId: grandchild.responsibleUserId,
+            ownerUserId: grandchild.ownerUserId,
+            ownerName: grandchild.ownerName,
+            inherited: grandchild.inherited,
+            weekCounts: grandchild.weekCounts,
+          }));
+
+        const childComplete = progressComplete(child.weekProgress);
+        const includeChild = (!mineOnly || child.ownerUserId === user?.id || grandchildren.length > 0) &&
+          (statusFilter !== "INCOMPLETE" || !childComplete) &&
+          (parentMatches || childMatches || grandchildren.length > 0);
+        if (!includeChild) return [];
+
+        return [{
+          key: `child:${child.id ?? parent.categoryLevel1 + ":" + child.categoryLevel2}`,
           id: child.id,
+          level: 2 as const,
           isParent: false,
-          importStatus: expectedWeeks > 0 && child.weekCounts.length === expectedWeeks && child.weekCounts.every((week) =>
-            isSearchTab ? (week.daysWithData ?? week.count) === 7 : week.count > 0)
-            ? "COMPLETE" as const
-            : "INCOMPLETE" as const,
+          importStatus: childComplete ? "COMPLETE" as const : "INCOMPLETE" as const,
           categoryLevel1: "",
           categoryLevel2: child.categoryLevel2,
+          categoryLevel3: null,
           responsibleUserId: child.responsibleUserId,
           ownerUserId: child.ownerUserId,
           ownerName: child.ownerName,
           inherited: child.inherited,
           weekCounts: child.weekCounts,
-        }));
+          weekProgress: child.weekProgress,
+          totalChildren: child.totalGrandchildren,
+          children: grandchildren,
+        }];
+      });
 
-      const parentMatches = !keyword || parent.categoryLevel1.toLocaleLowerCase().includes(keyword);
-      const parentComplete = expectedWeeks > 0 && parent.weekProgress.length === expectedWeeks &&
-        parent.weekProgress.every((week) => isSearchTab
-          ? parent.children.length > 0
-            ? week.total > 0 && week.imported === week.total
-            : (week.daysWithData ?? 0) === 7
-          : week.total > 0 && week.imported === week.total);
+      const parentComplete = progressComplete(parent.weekProgress);
       const includeParent = (!mineOnly || parent.ownerUserId === user?.id || childRows.length > 0) &&
-        (parentMatches || childRows.length > 0) && (statusFilter !== "INCOMPLETE" || !parentComplete);
+        (parentMatches || childRows.length > 0) &&
+        (statusFilter !== "INCOMPLETE" || !parentComplete);
       if (!includeParent) return [];
 
       return [{
         key: `parent:${parent.categoryLevel1}`,
         id: parent.id,
+        level: 1 as const,
         isParent: true,
-        importStatus: parentComplete ? "COMPLETE" : "INCOMPLETE",
+        importStatus: parentComplete ? "COMPLETE" as const : "INCOMPLETE" as const,
         categoryLevel1: parent.categoryLevel1,
         categoryLevel2: null,
+        categoryLevel3: null,
         responsibleUserId: parent.responsibleUserId,
         ownerUserId: parent.ownerUserId,
         ownerName: parent.ownerName,
         inherited: false,
         weekProgress: parent.weekProgress,
-        totalChildren: parent.children.length,
+        totalChildren: parent.weekProgress[0]?.total ?? 0,
         children: childRows,
       }];
     });
   }, [overview, mineOnly, statusFilter, search, user?.id, isSearchTab]);
 
-  function openCreate(type: "parent" | "child") {
+  function openCreate(type: "parent" | "child" | "grandchild") {
     setCategoryType(type);
     form.resetFields();
     form.setFieldsValue({ responsibleUserId: undefined });
@@ -217,7 +264,8 @@ export function CategoriesPage() {
       categoryLevel1: values.categoryLevel1,
       responsibleUserId: values.responsibleUserId || null,
     };
-    if (categoryType === "child") payload.categoryLevel2 = values.categoryLevel2;
+    if (categoryType === "child" || categoryType === "grandchild") payload.categoryLevel2 = values.categoryLevel2;
+    if (categoryType === "grandchild") payload.categoryLevel3 = values.categoryLevel3;
     createMutation.mutate(payload);
   }
 
@@ -232,7 +280,7 @@ export function CategoriesPage() {
       );
     }
 
-    const placeholder = row.isParent
+    const placeholder = row.level === 1
       ? "选择负责人"
       : row.ownerName ? `继承：${row.ownerName}` : "继承（未分配）";
     return (
@@ -255,34 +303,26 @@ export function CategoriesPage() {
   }
 
   function renderWeekCell(row: CategoryTableRow, period: WeekPeriod) {
-    if (row.isParent) {
+    if (row.level !== 3) {
       const progress = row.weekProgress?.find((item) => item.weekStart === period.weekStart);
       if (!progress) return <Typography.Text type="secondary">—</Typography.Text>;
-      if ((row.totalChildren ?? 0) > 0) {
+      if (progress.total > 0) {
         if (isSearchTab) {
           const partial = progress.partial ?? 0;
           const color = progress.imported === progress.total ? "success" : progress.imported > 0 || partial > 0 ? "warning" : "error";
           return (
-            <Tooltip title={`完整 ${progress.imported}/${progress.total} 个二级类目；部分完成 ${partial} 个；共 ${progress.recordCount} 条搜索记录。仅一级类目的数据归入“无二级类目”，各二级类目独立统计。`}>
+            <Tooltip title={`完整 ${progress.imported}/${progress.total} 个三级数据分支；部分完成 ${partial} 个；共 ${progress.recordCount} 条搜索记录。`}>
               <Tag color={color}>{progress.imported}/{progress.total}</Tag>
             </Tooltip>
           );
         }
         const color = progress.imported === progress.total ? "success" : progress.imported > 0 ? "warning" : "error";
         return (
-          <Tooltip title={`已导入 ${progress.imported}/${progress.total} 个二级类目，共 ${progress.recordCount} 条商品记录`}>
+          <Tooltip title={`已导入 ${progress.imported}/${progress.total} 个三级数据分支，共 ${progress.recordCount} 条商品记录`}>
             <Tag color={color}>{progress.imported}/{progress.total}</Tag>
           </Tooltip>
         );
       }
-      if (isSearchTab) {
-        const days = progress.daysWithData ?? 0;
-        const color = days === 7 ? "success" : days > 0 ? "warning" : "error";
-        return <Tooltip title={`该周 ${days}/7 天有搜索词记录，共 ${progress.recordCount} 条`}><Tag color={color}>{days}/7天</Tag></Tooltip>;
-      }
-      return progress.recordCount > 0
-        ? <Tag color="success">{progress.recordCount} 条</Tag>
-        : <Tag>缺失</Tag>;
     }
 
     const week = row.weekCounts?.find((item) => item.weekStart === period.weekStart);
@@ -305,7 +345,7 @@ export function CategoriesPage() {
         key: "categoryLevel1",
         width: 190,
         fixed: "left",
-        render: (value: string, row) => row.isParent
+        render: (value: string, row) => row.level === 1
           ? <Typography.Text strong>{value}</Typography.Text>
           : <Typography.Text type="secondary">—</Typography.Text>,
       },
@@ -315,9 +355,21 @@ export function CategoriesPage() {
         key: "categoryLevel2",
         width: 190,
         fixed: "left",
-        render: (value: string | null, row) => row.isParent
+        render: (value: string | null, row) => row.level === 1
           ? <Typography.Text type="secondary">全部二级类目</Typography.Text>
-          : <Typography.Text>{value}</Typography.Text>,
+          : row.level === 2 ? <Typography.Text>{value}</Typography.Text> : <Typography.Text type="secondary">—</Typography.Text>,
+      },
+      {
+        title: "三级类目",
+        dataIndex: "categoryLevel3",
+        key: "categoryLevel3",
+        width: 190,
+        fixed: "left",
+        render: (value: string | null, row) => row.level === 1
+          ? <Typography.Text type="secondary">全部三级类目</Typography.Text>
+          : row.level === 2
+            ? <Typography.Text type="secondary">{row.totalChildren ? `${row.totalChildren} 个三级分类` : "暂无三级分类"}</Typography.Text>
+            : <Typography.Text>{value}</Typography.Text>,
       },
       {
         title: "负责人",
@@ -334,13 +386,9 @@ export function CategoriesPage() {
         fixed: "left",
         align: "center",
         render: (value: CategoryTableRow["importStatus"], row) => {
-          const completedWeeks = row.isParent
-            ? row.weekProgress?.filter((week) => isSearchTab
-              ? row.totalChildren
-                ? week.total > 0 && week.imported === week.total
-                : (week.daysWithData ?? 0) === 7
-              : week.total > 0 && week.imported === week.total).length ?? 0
-            : row.weekCounts?.filter((week) => isSearchTab ? (week.daysWithData ?? week.count) === 7 : week.count > 0).length ?? 0;
+          const completedWeeks = row.level === 3
+            ? row.weekCounts?.filter((week) => isSearchTab ? (week.daysWithData ?? week.count) === 7 : week.count > 0).length ?? 0
+            : row.weekProgress?.filter((week) => week.total > 0 && week.imported === week.total).length ?? 0;
           const totalWeeks = overview?.periods.length ?? 12;
           return (
             <Tooltip title={`最近${totalWeeks}周完成 ${completedWeeks}/${totalWeeks} 周`}>
@@ -370,6 +418,9 @@ export function CategoriesPage() {
     value: item.categoryLevel1,
     label: item.categoryLevel1,
   }));
+  const childOptions = (overview?.categories.find((item) => item.categoryLevel1 === selectedParentForForm)?.children ?? [])
+    .filter((item) => item.categoryLevel2 !== "无二级类目")
+    .map((item) => ({ value: item.categoryLevel2, label: item.categoryLevel2 }));
 
   return (
     <div className="page-stack categories-page">
@@ -377,12 +428,13 @@ export function CategoriesPage() {
         <div>
           <div className="eyebrow">CATEGORY TRACKING</div>
           <Typography.Title level={2}>类目管理</Typography.Title>
-          <Typography.Text type="secondary">{isSearchTab ? "按日维度检查搜索词数据；每周7天都有记录才算完整，二级类目可继承一级类目数据。" : "分别查看新品流量和交易增速最近12周的导入情况，缺失周期一目了然。"}</Typography.Text>
+          <Typography.Text type="secondary">{isSearchTab ? "分别检查搜索词和核心词的日维度数据；每周7天都有记录才算完整，三级类目优先继承二级类目负责人。" : "分别查看新品流量和交易增速最近12周的导入情况，支持按三级类目追踪。"}</Typography.Text>
         </div>
         {isAdmin && (
           <Space wrap>
             <Button icon={<PlusOutlined />} onClick={() => openCreate("parent")}>新增一级类目</Button>
-            <Button type="primary" icon={<PlusOutlined />} onClick={() => openCreate("child")}>新增二级类目</Button>
+            <Button icon={<PlusOutlined />} onClick={() => openCreate("child")}>新增二级类目</Button>
+            <Button type="primary" icon={<PlusOutlined />} onClick={() => openCreate("grandchild")}>新增三级类目</Button>
           </Space>
         )}
       </div>
@@ -397,7 +449,7 @@ export function CategoriesPage() {
       />
 
       <div className="import-summary-grid category-summary-grid">
-        <div><span>统计类目</span><strong>{summary.total}</strong></div>
+        <div><span>统计末级分类</span><strong>{summary.total}</strong></div>
         <div><span>最近12周已完成</span><strong>{summary.complete}</strong></div>
         <div><span>最近12周未完成</span><strong>{summary.incomplete}</strong></div>
         <div><span>整体完成率</span><strong>{summary.rate}%</strong></div>
@@ -406,7 +458,11 @@ export function CategoriesPage() {
       <Card bordered={false} className="table-card category-table-card">
         <div className="category-toolbar">
           <Space wrap size={10}>
-            {!isSearchTab && <Segmented
+            {isSearchTab ? <Segmented
+              value={searchTermType}
+              options={[{ label: "搜索词", value: "搜索词" }, { label: "核心词", value: "核心词" }]}
+              onChange={(value) => setSearchTermType(value as "搜索词" | "核心词")}
+            /> : <Segmented
               value={boardType}
               options={[{ label: "新品流量", value: "NEW_PRODUCT_TRAFFIC" }, { label: "交易增速", value: "TRANSACTION_GROWTH" }]}
               onChange={(value) => setBoardType(value as "NEW_PRODUCT_TRAFFIC" | "TRANSACTION_GROWTH")}
@@ -423,7 +479,7 @@ export function CategoriesPage() {
             />
             <Input.Search
               allowClear
-              placeholder="搜索一级或二级类目"
+              placeholder="搜索一级、二级或三级类目"
               style={{ width: 240 }}
               value={search}
               onChange={(event) => setSearch(event.target.value)}
@@ -443,7 +499,7 @@ export function CategoriesPage() {
           defaultExpandAllRows
           pagination={{ pageSize: 30, showSizeChanger: true, pageSizeOptions: [30, 50, 100], showTotal: (total) => `共 ${total} 个一级类目` }}
           scroll={{ x: 2000 }}
-          rowClassName={(row) => row.isParent ? "category-parent-row" : "category-child-row"}
+          rowClassName={(row) => row.level === 1 ? "category-parent-row" : row.level === 2 ? "category-child-row" : "category-grandchild-row"}
           locale={{ emptyText: <Empty description={statusFilter === "INCOMPLETE" ? "所有类目最近12周均已完成导入" : mineOnly ? "暂时没有分配给你的类目" : "暂无类目，请先添加类目或导入数据"} /> }}
         />
         <div className="category-legend">
@@ -451,19 +507,19 @@ export function CategoriesPage() {
             <span><Tag color="success">7/7天</Tag> 该周每天均有搜索词记录</span>
             <span><Tag color="warning">1～6/7天</Tag> 该周数据不完整</span>
             <span><Tag color="error">0/7天</Tag> 该周没有搜索词记录</span>
-            <span><Tag>继承</Tag> 二级类目使用一级类目当周数据</span>
+            <span><Tag>继承</Tag> 三级类目优先继承二级负责人，二级再继承一级</span>
           </> : <>
             <span><Tag color="success">已完成</Tag> 最近12周均有导入记录</span>
             <span><Tag color="error">未完成</Tag> 至少有一个周期缺失</span>
             <span><Tag color="success">已导入</Tag> 有商品记录</span>
             <span><Tag>缺失</Tag> 该周没有入库记录</span>
-            <span><Tag color="warning">部分完成</Tag> 一级类目下仍有二级类目缺失</span>
+            <span><Tag color="warning">部分完成</Tag> 一级或二级类目下仍有三级分类缺失</span>
           </>}
         </div>
       </Card>
 
       <Modal
-        title={categoryType === "parent" ? "新增一级类目" : "新增二级类目"}
+        title={categoryType === "parent" ? "新增一级类目" : categoryType === "child" ? "新增二级类目" : "新增三级类目"}
         open={categoryModalOpen}
         onCancel={() => { setCategoryModalOpen(false); form.resetFields(); }}
         onOk={() => form.submit()}
@@ -480,11 +536,22 @@ export function CategoriesPage() {
           ) : (
             <>
               <Form.Item name="categoryLevel1" label="所属一级类目" rules={[{ required: true, message: "请选择一级类目" }]}>
-                <Select showSearch optionFilterProp="label" options={parentOptions} placeholder="选择所属一级类目" />
+                <Select showSearch optionFilterProp="label" options={parentOptions} placeholder="选择所属一级类目" onChange={() => form.setFieldsValue({ categoryLevel2: undefined })} />
               </Form.Item>
-              <Form.Item name="categoryLevel2" label="二级类目名称" rules={[{ required: true, whitespace: true, message: "请输入二级类目名称" }]}>
-                <Input maxLength={255} placeholder="例如：厨房置物架" />
-              </Form.Item>
+              {categoryType === "child" ? (
+                <Form.Item name="categoryLevel2" label="二级类目名称" rules={[{ required: true, whitespace: true, message: "请输入二级类目名称" }]}>
+                  <Input maxLength={255} placeholder="例如：厨房置物架" />
+                </Form.Item>
+              ) : (
+                <>
+                  <Form.Item name="categoryLevel2" label="所属二级类目" rules={[{ required: true, message: "请选择二级类目" }]}>
+                    <Select showSearch optionFilterProp="label" options={childOptions} placeholder={selectedParentForForm ? "选择所属二级类目" : "请先选择一级类目"} disabled={!selectedParentForForm} />
+                  </Form.Item>
+                  <Form.Item name="categoryLevel3" label="三级类目名称" rules={[{ required: true, whitespace: true, message: "请输入三级类目名称" }]}>
+                    <Input maxLength={255} placeholder="例如：调料架" />
+                  </Form.Item>
+                </>
+              )}
             </>
           )}
           <Form.Item name="responsibleUserId" label={categoryType === "parent" ? "默认负责人（可选）" : "单独负责人（可选）"}>
@@ -493,7 +560,7 @@ export function CategoriesPage() {
               showSearch
               optionFilterProp="label"
               options={employeeOptions}
-              placeholder={categoryType === "parent" ? "选择后默认分配给下属二级类目" : "不选择则继承一级类目负责人"}
+              placeholder={categoryType === "parent" ? "选择后默认分配给下属二级类目" : categoryType === "child" ? "不选择则继承一级类目负责人" : "不选择则继承二级或一级类目负责人"}
             />
           </Form.Item>
         </Form>

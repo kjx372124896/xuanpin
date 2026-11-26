@@ -14,7 +14,7 @@ interface PreviewFile {
   rowCount: number; validRows: number; duplicateRows: number; errorCount: number; parseError: string | null;
   errors?: Array<{ row: number; productId?: string; message: string }>;
 }
-interface PreviewRow { boardType: "NEW_PRODUCT_TRAFFIC" | "TRANSACTION_GROWTH"; productId: string; productName: string; categoryName: string; categoryLevel1: string; categoryLevel2: string; weekStart: string; weekEnd: string; rank: number | null; visitor: { raw: string | null; min: number | null; max: number | null; median: number | null }; buyer: { raw: string | null; min: number | null; max: number | null; median: number | null } }
+interface PreviewRow { boardType: "NEW_PRODUCT_TRAFFIC" | "TRANSACTION_GROWTH"; productId: string; productName: string; categoryName: string; categoryLevel1: string; categoryLevel2: string; categoryLevel3: string; weekStart: string; weekEnd: string; rank: number | null; visitor: { raw: string | null; min: number | null; max: number | null; median: number | null }; buyer: { raw: string | null; min: number | null; max: number | null; median: number | null } }
 interface PreviewResult { batchId: string; status: string; totalFiles: number; totalRows: number; validRows: number; duplicateRows: number; errorRows: number; duplicateFiles: number; files: PreviewFile[]; previewRows: PreviewRow[] }
 interface ImportBatch { id: string; status: string; totalFiles: number; totalRows: number; importedRows: number; duplicateRows: number; errorRows: number; newProducts: number; createdHistories: number; updatedHistories: number; createdAt: string; completedAt: string | null; files: Array<{ id: string; originalName: string; boardType: "NEW_PRODUCT_TRAFFIC" | "TRANSACTION_GROWTH" | null; status: string; rowCount: number; importedCount: number; errorCount: number; errorsJson?: string | null }> }
 
@@ -66,11 +66,12 @@ function ProductImportPanel() {
   async function createPreview() {
     const files = fileList.map((file) => file.originFileObj).filter(Boolean) as File[];
     if (!files.length) { message.warning("请先选择 Excel 文件。"); return; }
+    if (files.length > 400) { message.warning("单批最多上传 400 个 Excel 文件，请分批上传。"); return; }
     setUploading(true);
     const formData = new FormData();
     files.forEach((file) => formData.append("files", file));
     try {
-      const result = (await api.post<PreviewResult>("/imports/preview", formData)).data;
+      const result = (await api.post<PreviewResult>("/imports/preview", formData, { timeout: 720_000 })).data;
       setPreview(result); setBatchId(result.batchId);
       message.success(`解析完成：${result.validRows.toLocaleString()} 行去重后有效数据`);
     } catch (error) { message.error(errorMessage(error)); }
@@ -118,6 +119,7 @@ function ProductImportPanel() {
     { title: "结束日期", dataIndex: "weekEnd", key: "weekEnd", width: 112 },
     { title: "一级类目", dataIndex: "categoryLevel1", key: "categoryLevel1", width: 130 },
     { title: "二级类目", dataIndex: "categoryLevel2", key: "categoryLevel2", width: 150 },
+    { title: "三级类目", dataIndex: "categoryLevel3", key: "categoryLevel3", width: 150 },
     { title: "支付买家数（最小/最大/中值）", key: "buyer", width: 165, render: (_: unknown, row: PreviewRow) => previewMetric(row.buyer) },
     { title: "访客数（最小/最大/中值）", key: "visitor", width: 165, render: (_: unknown, row: PreviewRow) => previewMetric(row.visitor) },
   ];
@@ -127,7 +129,7 @@ function ProductImportPanel() {
       <div className="page-heading-row"><div><div className="eyebrow">DATA INGESTION</div><Typography.Title level={2}>数据导入</Typography.Title><Typography.Text type="secondary">支持批量导入生意参谋原始明细或合并结果工作簿，导入前先预览和校验。</Typography.Text></div><Button icon={<ReloadOutlined />} onClick={() => void batchesQuery.refetch()}>刷新记录</Button></div>
 
       <Card className="upload-card" bordered={false}>
-        <div className="section-heading"><div><Typography.Title level={4}>上传榜单文件</Typography.Title><Typography.Text type="secondary">支持同时选择多份 .xlsx 文件，单文件最大 50 MB，最多 100 份。</Typography.Text></div><Tag color="blue">Excel .xlsx</Tag></div>
+        <div className="section-heading"><div><Typography.Title level={4}>上传榜单文件</Typography.Title><Typography.Text type="secondary">支持同时选择多份 .xlsx 文件，单文件最大 50 MB，最多 400 份。</Typography.Text></div><Tag color="blue">Excel .xlsx</Tag></div>
         <Upload.Dragger accept=".xlsx" multiple directory fileList={fileList} beforeUpload={() => false} onChange={({ fileList: next }) => setFileList(next.filter((file) => !file.name.startsWith("~$")))} onRemove={(file) => { setFileList((current) => current.filter((item) => item.uid !== file.uid)); return true; }}>
           <p className="upload-drag-icon"><CloudUploadOutlined /></p><p className="ant-upload-text">点击选择文件，或将 Excel 文件拖拽到这里</p><p className="ant-upload-hint">可以多选 Excel 文件或直接选择整个文件夹；也可以上传合并结果工作簿。</p>
         </Upload.Dragger>
@@ -137,7 +139,7 @@ function ProductImportPanel() {
       {preview && <Card className="table-card" bordered={false}>
         <div className="section-heading"><div><Typography.Title level={4}>导入预览</Typography.Title><Typography.Text type="secondary">批次编号：{preview.batchId}</Typography.Text></div><StatusTag status={currentBatch?.status ?? preview.status} /></div>
         <div className="import-summary-grid product-import-summary-grid"><div><span>文件数</span><strong>{preview.totalFiles}</strong></div><div><span>读取数据行</span><strong>{preview.totalRows.toLocaleString()}</strong></div><div><span>去重后有效</span><strong>{preview.validRows.toLocaleString()}</strong></div><div><span>批次内重复行</span><strong>{preview.duplicateRows.toLocaleString()}</strong></div><div><span>异常行</span><strong className={preview.errorRows ? "text-danger" : ""}>{preview.errorRows.toLocaleString()}</strong></div><div><span>重复文件</span><strong>{preview.duplicateFiles}</strong></div></div>
-        <Table rowKey="id" columns={fileColumns} dataSource={preview.files} pagination={false} size="small" scroll={{ x: 900 }} />
+        <Table className="import-preview-files" rowKey="id" columns={fileColumns} dataSource={preview.files} pagination={false} size="small" scroll={{ x: 900, y: 320 }} />
         {preview.duplicateRows > 0 && <Alert type="info" showIcon message={`已在预览阶段识别 ${preview.duplicateRows} 条批次内重复记录`} description="相同榜单类型、商品ID、周期和类目的记录已归并，并保留导出时间最新的一条；确认导入时只会写入归并后的数据。" className="section-alert" />}
         {preview.files.some((file) => file.parseError) && <Alert type="error" showIcon message="部分文件无法解析" description={preview.files.filter((file) => file.parseError).map((file) => `${file.originalName}：${file.parseError}`).join("；")} className="section-alert" />}
         {preview.errorRows > 0 && <Alert type="warning" showIcon message={`发现 ${preview.errorRows} 行异常数据`} description="异常行不会写入数据库；其他通过校验的数据仍可正常导入。导入完成后可在批次详情中查看错误行号。" className="section-alert" />}

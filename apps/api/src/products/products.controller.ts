@@ -28,12 +28,16 @@ export class ProductsController {
     const categoryLevel2 = typeof query.categoryLevel2 === "string"
       ? query.categoryLevel2.split(",").map((value: string) => value.trim()).filter(Boolean)
       : Array.isArray(query.categoryLevel2) ? query.categoryLevel2.map(String).filter(Boolean) : undefined;
+    const categoryLevel3 = typeof query.categoryLevel3 === "string"
+      ? query.categoryLevel3.split(",").map((value: string) => value.trim()).filter(Boolean)
+      : Array.isArray(query.categoryLevel3) ? query.categoryLevel3.map(String).filter(Boolean) : undefined;
     return this.productsService.list({
       ...query,
       cursor: typeof query.cursor === "string" ? query.cursor : undefined,
       latestWeekStarts,
       categoryLevel1,
       categoryLevel2,
+      categoryLevel3,
       listingDateFrom: typeof query.listingDateFrom === "string" ? query.listingDateFrom : undefined,
       listingDateTo: typeof query.listingDateTo === "string" ? query.listingDateTo : undefined,
       latestBuyerMedianMin: numeric(query.latestBuyerMedianMin),
@@ -64,12 +68,16 @@ export class ProductsController {
     const categoryLevel2 = typeof query.categoryLevel2 === "string"
       ? query.categoryLevel2.split(",").map((value: string) => value.trim()).filter(Boolean)
       : Array.isArray(query.categoryLevel2) ? query.categoryLevel2.map(String).filter(Boolean) : undefined;
+    const categoryLevel3 = typeof query.categoryLevel3 === "string"
+      ? query.categoryLevel3.split(",").map((value: string) => value.trim()).filter(Boolean)
+      : Array.isArray(query.categoryLevel3) ? query.categoryLevel3.map(String).filter(Boolean) : undefined;
     return this.productsService.teamFavorites({
       ...query,
       cursor: typeof query.cursor === "string" ? query.cursor : undefined,
       latestWeekStarts,
       categoryLevel1,
       categoryLevel2,
+      categoryLevel3,
       listingDateFrom: typeof query.listingDateFrom === "string" ? query.listingDateFrom : undefined,
       listingDateTo: typeof query.listingDateTo === "string" ? query.listingDateTo : undefined,
       latestBuyerMedianMin: numeric(query.latestBuyerMedianMin),
@@ -83,11 +91,18 @@ export class ProductsController {
       adminUserId: request.user.id,
     });
   }
-  @Get("categories") categories(@Query("level1") level1?: string | string[], @Query("boardType") boardType?: string) {
+  @Get("categories") categories(
+    @Query("level1") level1?: string | string[],
+    @Query("level2") level2?: string | string[],
+    @Query("boardType") boardType?: string,
+  ) {
     const levels = typeof level1 === "string"
       ? level1.split(",").map((value) => value.trim()).filter(Boolean)
       : Array.isArray(level1) ? level1.map(String).filter(Boolean) : undefined;
-    return this.productsService.categories(levels, parseBoardType(boardType));
+    const selectedLevel2 = typeof level2 === "string"
+      ? level2.split(",").map((value) => value.trim()).filter(Boolean)
+      : Array.isArray(level2) ? level2.map(String).filter(Boolean) : undefined;
+    return this.productsService.categories(levels, selectedLevel2, parseBoardType(boardType));
   }
   @Get("periods") periods(@Query("boardType") boardType?: string) { return this.productsService.periods(parseBoardType(boardType)); }
   @Roles("ADMIN", "SUPER_ADMIN")
