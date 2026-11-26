@@ -26,6 +26,88 @@ after(async () => { await prisma?.$disconnect(); });
 const integration = (name: string, run: () => Promise<void>) => test(name, { skip: !prisma }, run);
 const unique = () => randomBytes(10).toString("hex");
 
+integration("PostgreSQL：归档旧斜杠拆分的空类目，保留真实分支、手工类目和负责人", async () => {
+  const migration = await readFile(path.resolve(__dirname, "../../../../prisma/migrations/20261126160000_archive_legacy_category_nodes/migration.sql"), "utf8");
+  const statements = migration.replace(/^BEGIN;|^COMMIT;/gm, "").split(";").map((sql) => sql.trim()).filter(Boolean);
+  await prisma!.$transaction(async (tx) => {
+    await tx.$executeRawUnsafe(`CREATE TEMP TABLE "商品上榜历史表" (
+      "类目名称" TEXT, "一级类目" TEXT
+    ) ON COMMIT DROP`);
+    await tx.$executeRawUnsafe(`CREATE TEMP TABLE "搜索词日历史表" (
+      "类目" TEXT, "一级类目" TEXT
+    ) ON COMMIT DROP`);
+    await tx.$executeRawUnsafe(`CREATE TEMP TABLE "类目表" (
+      "类目ID" TEXT PRIMARY KEY, "类目名称" TEXT UNIQUE,
+      "一级类目" TEXT, "二级类目" TEXT, "三级类目" TEXT,
+      "负责人ID" TEXT, "是否启用" BOOLEAN, "创建时间" TIMESTAMP DEFAULT NOW(), "更新时间" TIMESTAMP DEFAULT NOW()
+    ) ON COMMIT DROP`);
+    await tx.$executeRawUnsafe(`CREATE TEMP TABLE "类目路径迁移异常表" (
+      "来源表" TEXT, "来源记录ID" TEXT, "原始类目路径" TEXT, "异常类型" TEXT,
+      "记录时间" TIMESTAMP DEFAULT NOW(), PRIMARY KEY ("来源表", "来源记录ID")
+    ) ON COMMIT DROP`);
+    await tx.$executeRawUnsafe(`INSERT INTO "商品上榜历史表" VALUES
+      ('家庭/个人清洁工具 / 清洁刷', '家庭/个人清洁工具'),
+      ('五金/工具 / 扳手', '五金/工具'),
+      ('服饰配件/皮带/帽子/围巾 / 配件', '服饰配件/皮带/帽子/围巾'),
+      ('玩具/童车/益智 / 拼图', '玩具/童车/益智'),
+      ('运动包/户外包/配件 / 腰包', '运动包/户外包/配件'),
+      ('箱包皮具/热销女包/男包 / 手提包', '箱包皮具/热销女包/男包')`);
+    await tx.$executeRawUnsafe(`INSERT INTO "搜索词日历史表" VALUES
+      ('玩具', '玩具'),
+      ('服饰配件/其他 / 发饰', '服饰配件/其他')`);
+    await tx.$executeRawUnsafe(`INSERT INTO "类目表"
+      ("类目ID", "类目名称", "一级类目", "二级类目", "三级类目", "负责人ID", "是否启用") VALUES
+      ('old-family', '家庭', '家庭', NULL, NULL, 'employee-1', TRUE),
+      ('old-family-none', '家庭 / 无二级类目', '家庭', '无二级类目', NULL, NULL, TRUE),
+      ('new-family', '家庭/个人清洁工具', '家庭/个人清洁工具', NULL, NULL, NULL, TRUE),
+      ('old-hardware', '五金', '五金', NULL, NULL, 'employee-1', TRUE),
+      ('new-hardware', '五金/工具', '五金/工具', NULL, NULL, 'employee-2', FALSE),
+      ('old-accessories', '服饰配件', '服饰配件', NULL, NULL, 'employee-3', TRUE),
+      ('new-accessories', '服饰配件/皮带/帽子/围巾', '服饰配件/皮带/帽子/围巾', NULL, NULL, NULL, TRUE),
+      ('new-accessories-other', '服饰配件/其他', '服饰配件/其他', NULL, NULL, NULL, TRUE),
+      ('real-toys', '玩具', '玩具', NULL, NULL, 'employee-4', TRUE),
+      ('new-toys', '玩具/童车/益智', '玩具/童车/益智', NULL, NULL, NULL, TRUE),
+      ('manual-sports-root', '运动包', '运动包', NULL, NULL, NULL, TRUE),
+      ('manual-sports-child', '运动包 / 手工分类', '运动包', '手工分类', NULL, NULL, TRUE),
+      ('new-sports', '运动包/户外包/配件', '运动包/户外包/配件', NULL, NULL, NULL, TRUE),
+      ('manual-bags-root', '箱包皮具', '箱包皮具', NULL, NULL, NULL, TRUE),
+      ('manual-bags-child', '箱包皮具 / 已停用分类', '箱包皮具', '已停用分类', NULL, NULL, FALSE),
+      ('new-bags', '箱包皮具/热销女包/男包', '箱包皮具/热销女包/男包', NULL, NULL, NULL, TRUE),
+      ('manual-empty', '手工空类目', '手工空类目', NULL, NULL, NULL, TRUE)`);
+
+    for (const sql of statements) await tx.$executeRawUnsafe(sql);
+    const rows = await tx.$queryRawUnsafe<Array<{ name: string; owner: string | null; enabled: boolean }>>(`
+      SELECT "类目名称" AS name, "负责人ID" AS owner, "是否启用" AS enabled FROM "类目表"
+    `);
+    for (const name of ["家庭", "家庭 / 无二级类目", "五金", "服饰配件"]) {
+      assert.equal(rows.some((row) => row.name === name), false, name);
+    }
+    for (const name of ["玩具", "运动包", "运动包 / 手工分类", "箱包皮具", "箱包皮具 / 已停用分类", "手工空类目"]) {
+      assert.ok(rows.some((row) => row.name === name), name);
+    }
+    assert.deepEqual(rows.find((row) => row.name === "家庭/个人清洁工具"), {
+      name: "家庭/个人清洁工具", owner: "employee-1", enabled: true,
+    });
+    assert.deepEqual(rows.find((row) => row.name === "五金/工具"), {
+      name: "五金/工具", owner: "employee-2", enabled: false,
+    });
+    assert.equal(rows.find((row) => row.name === "服饰配件/皮带/帽子/围巾")?.owner, "employee-3");
+    assert.equal(rows.find((row) => row.name === "服饰配件/其他")?.owner, "employee-3");
+    const archived = await tx.$queryRawUnsafe<Array<{ sourceData: { 负责人ID: string | null; 是否启用: boolean } }>>(`
+      SELECT "原始记录" AS "sourceData" FROM "类目路径迁移异常表"
+    `);
+    assert.equal(archived.length, 4);
+    assert.ok(archived.some((row) => row.sourceData.负责人ID === "employee-1" && row.sourceData.是否启用));
+    assert.deepEqual(await tx.$queryRawUnsafe(`SELECT COUNT(*)::int AS count FROM "商品上榜历史表"`), [{ count: 6 }]);
+    assert.deepEqual(await tx.$queryRawUnsafe(`SELECT COUNT(*)::int AS count FROM "搜索词日历史表"`), [{ count: 2 }]);
+
+    // A later import may legitimately use a previously obsolete first-level name again.
+    await tx.$executeRawUnsafe(`INSERT INTO "类目表" ("类目ID", "类目名称", "一级类目", "是否启用")
+      VALUES ('reimport-family', '家庭', '家庭', TRUE)`);
+    assert.deepEqual(await tx.$queryRawUnsafe(`SELECT "是否启用" AS enabled FROM "类目表" WHERE "类目名称" = '家庭'`), [{ enabled: true }]);
+  });
+});
+
 integration("PostgreSQL：三级迁移合并空格不同的缺省节点，并保留已有负责人和启用状态", async () => {
   const migration = await readFile(path.resolve(__dirname, "../../../../prisma/migrations/20261126100000_three_level_categories/migration.sql"), "utf8");
   const start = migration.indexOf("WITH third_levels AS (");

@@ -323,6 +323,7 @@ model CategoryPathMigrationIssue {
   sourceRecordId String   @map("来源记录ID") @db.VarChar(30)
   rawPath        String   @map("原始类目路径") @db.VarChar(255)
   issueType      String   @map("异常类型") @db.VarChar(80)
+  sourceData     Json?    @map("原始记录")
   createdAt      DateTime @default(now()) @map("记录时间")
 
   @@id([sourceTable, sourceRecordId], map: "类目路径迁移异常表_pkey")

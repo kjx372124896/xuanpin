@@ -289,7 +289,7 @@ export function CategoriesPage() {
         allowClear
         showSearch
         optionFilterProp="label"
-        style={{ width: 150 }}
+        style={{ width: "100%" }}
         placeholder={placeholder}
         value={row.responsibleUserId ?? undefined}
         options={employeeOptions}
@@ -344,6 +344,7 @@ export function CategoriesPage() {
         dataIndex: "categoryLevel1",
         key: "categoryLevel1",
         width: 190,
+        ellipsis: true,
         fixed: "left",
         render: (value: string, row) => row.level === 1
           ? <Typography.Text strong>{value}</Typography.Text>
@@ -354,6 +355,7 @@ export function CategoriesPage() {
         dataIndex: "categoryLevel2",
         key: "categoryLevel2",
         width: 190,
+        ellipsis: true,
         fixed: "left",
         render: (value: string | null, row) => row.level === 1
           ? <Typography.Text type="secondary">全部二级类目</Typography.Text>
@@ -364,6 +366,7 @@ export function CategoriesPage() {
         dataIndex: "categoryLevel3",
         key: "categoryLevel3",
         width: 190,
+        ellipsis: true,
         fixed: "left",
         render: (value: string | null, row) => row.level === 1
           ? <Typography.Text type="secondary">全部三级类目</Typography.Text>
@@ -411,7 +414,10 @@ export function CategoriesPage() {
       align: "center",
       render: (_value, row) => renderWeekCell(row, period),
     }));
-    return [...fixedColumns, ...weekColumns];
+    return [...fixedColumns, ...weekColumns].map((column) => ({
+      ...column,
+      width: typeof column.width === "number" ? Math.round(column.width * 2 / 3) : column.width,
+    }));
   }, [overview, employeeOptions, isAdmin, ownerMutation.isPending, isSearchTab]);
 
   const parentOptions = (overview?.categories ?? []).map((item) => ({
@@ -494,11 +500,12 @@ export function CategoriesPage() {
           className="category-register-table"
           rowKey="key"
           columns={columns}
+          tableLayout="fixed"
           dataSource={tableRows}
           loading={overviewLoading}
           defaultExpandAllRows
           pagination={{ pageSize: 30, showSizeChanger: true, pageSizeOptions: [30, 50, 100], showTotal: (total) => `共 ${total} 个一级类目` }}
-          scroll={{ x: 2000 }}
+          scroll={{ x: columns.reduce((total, column) => total + (typeof column.width === "number" ? column.width : 0), 0) }}
           rowClassName={(row) => row.level === 1 ? "category-parent-row" : row.level === 2 ? "category-child-row" : "category-grandchild-row"}
           locale={{ emptyText: <Empty description={statusFilter === "INCOMPLETE" ? "所有类目最近12周均已完成导入" : mineOnly ? "暂时没有分配给你的类目" : "暂无类目，请先添加类目或导入数据"} /> }}
         />
