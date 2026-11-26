@@ -682,13 +682,16 @@ export function SearchTrendsPage() {
               </Typography.Text>
             </div>
           </div>
+          {isAdmin && (
+            <div className="bulk-ai-actions">
+              <Segmented
+                value={showTeamFavorites ? "team" : "all"}
+                options={[{ label: "全部搜索词", value: "all" }, { label: "成员收藏", value: "team" }]}
+                onChange={(value) => { setTeamFavoritesMode(value === "team"); setPage(1); }}
+              />
+            </div>
+          )}
           <div className="table-heading-actions">
-            {isAdmin && <Segmented
-              size="small"
-              value={showTeamFavorites ? "team" : "all"}
-              options={[{ label: "全部搜索词", value: "all" }, { label: "成员收藏", value: "team" }]}
-              onChange={(value) => { setTeamFavoritesMode(value === "team"); setPage(1); }}
-            />}
             <Space size={8}>
               <Button size="small" disabled={page <= 1 || trendsQuery.isFetching} onClick={() => setPage((current) => Math.max(1, current - 1))}>上一页</Button>
               <Typography.Text type="secondary">第 {page} / {Math.max(1, trendsQuery.data?.totalPages ?? 0)} 页</Typography.Text>

@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+  <title>选品数据中心</title>
+  <defs>
+    <linearGradient id="brand" x1="8" y1="4" x2="56" y2="62" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#4777FF" />
+      <stop offset="1" stop-color="#3153DF" />
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="15" fill="url(#brand)" />
+  <g fill="#FFF">
+    <rect x="14" y="12" width="36" height="11" rx="3" />
+    <rect x="14" y="27" width="36" height="11" rx="3" />
+    <rect x="14" y="42" width="36" height="11" rx="3" />
+  </g>
+  <g fill="#3862ED">
+    <circle cx="22" cy="17.5" r="2" />
+    <circle cx="22" cy="32.5" r="2" />
+    <circle cx="22" cy="47.5" r="2" />
+  </g>
+  <path d="M30 17.5H42M30 32.5H42M30 47.5H42" stroke="#3862ED" stroke-width="3" stroke-linecap="round" />
+</svg>
