@@ -8,6 +8,11 @@ import type { ColumnsType } from "antd/es/table";
 import dayjs from "dayjs";
 import { useAuth } from "../auth/AuthContext";
 import { api, errorMessage } from "../api";
+import {
+  CATEGORY_LEVELS, childImportBranches, getLevelImportProgress, grandchildImportBranches,
+  hasIncompleteImport, parentImportBranches,
+  type LevelImportProgress,
+} from "./category-import-progress";
 
 interface WeekPeriod {
   weekStart: string;
@@ -61,6 +66,7 @@ interface CategoryParent {
   responsibleUserName: string | null;
   ownerUserId: string | null;
   ownerName: string | null;
+  weekCounts: WeekCount[];
   weekProgress: WeekProgress[];
   children: CategoryChild[];
 }
@@ -79,7 +85,7 @@ interface CategoryTableRow {
   id: string | null;
   level: 1 | 2 | 3;
   isParent: boolean;
-  importStatus: "COMPLETE" | "INCOMPLETE";
+  importProgress: LevelImportProgress;
   categoryLevel1: string;
   categoryLevel2: string | null;
   categoryLevel3: string | null;
@@ -124,19 +130,12 @@ export function CategoriesPage() {
   const overviewLoading = isSearchTab ? searchOverviewQuery.isLoading : overviewQuery.isLoading;
   const overviewFetching = isSearchTab ? searchOverviewQuery.isFetching : overviewQuery.isFetching;
   const summary = useMemo(() => {
-    const categories = (overview?.categories ?? []).flatMap((parent) =>
-      parent.children.flatMap((child) => {
-        const leaves = child.grandchildren.length ? child.grandchildren : [child];
-        return leaves.map((leaf) => ({
-          complete: Boolean(overview?.periods.length) && leaf.weekCounts.length === overview!.periods.length &&
-            leaf.weekCounts.every((week) => isSearchTab
-              ? (week.daysWithData ?? week.count) === 7
-              : week.count > 0),
-        }));
-      }),
-    );
-    const total = categories.length;
-    const complete = categories.filter((item) => item.complete).length;
+    const progress = (overview?.categories ?? []).flatMap((parent) => {
+      const levels = getLevelImportProgress(parentImportBranches(parent), overview?.periods ?? [], isSearchTab);
+      return CATEGORY_LEVELS.flatMap((level) => levels[level] ? [levels[level]!] : []);
+    });
+    const total = progress.reduce((sum, level) => sum + level.total, 0);
+    const complete = progress.reduce((sum, level) => sum + level.imported, 0);
     return { total, complete, incomplete: total - complete, rate: total ? Math.round((complete / total) * 1000) / 10 : 0 };
   }, [overview, isSearchTab]);
   const employeeOptions = (overview?.employees ?? []).map((employee) => ({
@@ -168,13 +167,7 @@ export function CategoriesPage() {
 
   const tableRows = useMemo<CategoryTableRow[]>(() => {
     const keyword = search.trim().toLocaleLowerCase();
-    const expectedWeeks = overview?.periods.length ?? 0;
-    const weekCountsComplete = (weeks: WeekCount[]) =>
-      expectedWeeks > 0 && weeks.length === expectedWeeks && weeks.every((week) =>
-        isSearchTab ? (week.daysWithData ?? week.count) === 7 : week.count > 0);
-    const progressComplete = (weeks: WeekProgress[]) =>
-      expectedWeeks > 0 && weeks.length === expectedWeeks && weeks.every((week) =>
-        week.total > 0 && week.imported === week.total);
+    const periods = overview?.periods ?? [];
 
     return (overview?.categories ?? []).flatMap((parent) => {
       const parentMatches = !keyword || parent.categoryLevel1.toLocaleLowerCase().includes(keyword);
@@ -182,14 +175,13 @@ export function CategoriesPage() {
         const childMatches = child.categoryLevel2.toLocaleLowerCase().includes(keyword);
         const grandchildren = child.grandchildren
           .filter((grandchild) => !mineOnly || grandchild.ownerUserId === user?.id)
-          .filter((grandchild) => statusFilter !== "INCOMPLETE" || !weekCountsComplete(grandchild.weekCounts))
           .filter((grandchild) => !keyword || parentMatches || childMatches || grandchild.categoryLevel3.toLocaleLowerCase().includes(keyword))
           .map((grandchild) => ({
             key: `grandchild:${grandchild.id}`,
             id: grandchild.id,
             level: 3 as const,
             isParent: false,
-            importStatus: weekCountsComplete(grandchild.weekCounts) ? "COMPLETE" as const : "INCOMPLETE" as const,
+            importProgress: getLevelImportProgress(grandchildImportBranches(grandchild), periods, isSearchTab),
             categoryLevel1: "",
             categoryLevel2: null,
             categoryLevel3: grandchild.categoryLevel3,
@@ -198,11 +190,12 @@ export function CategoriesPage() {
             ownerName: grandchild.ownerName,
             inherited: grandchild.inherited,
             weekCounts: grandchild.weekCounts,
-          }));
+          }))
+          .filter((grandchild) => statusFilter !== "INCOMPLETE" || hasIncompleteImport(grandchild.importProgress));
 
-        const childComplete = progressComplete(child.weekProgress);
+        const childProgress = getLevelImportProgress(childImportBranches(child), periods, isSearchTab);
         const includeChild = (!mineOnly || child.ownerUserId === user?.id || grandchildren.length > 0) &&
-          (statusFilter !== "INCOMPLETE" || !childComplete) &&
+          (statusFilter !== "INCOMPLETE" || hasIncompleteImport(childProgress) || grandchildren.length > 0) &&
           (parentMatches || childMatches || grandchildren.length > 0);
         if (!includeChild) return [];
 
@@ -211,7 +204,7 @@ export function CategoriesPage() {
           id: child.id,
           level: 2 as const,
           isParent: false,
-          importStatus: childComplete ? "COMPLETE" as const : "INCOMPLETE" as const,
+          importProgress: childProgress,
           categoryLevel1: "",
           categoryLevel2: child.categoryLevel2,
           categoryLevel3: null,
@@ -221,15 +214,15 @@ export function CategoriesPage() {
           inherited: child.inherited,
           weekCounts: child.weekCounts,
           weekProgress: child.weekProgress,
-          totalChildren: child.totalGrandchildren,
+          totalChildren: child.grandchildren.filter((grandchild) => grandchild.categoryLevel3 !== "无三级类目").length,
           children: grandchildren,
         }];
       });
 
-      const parentComplete = progressComplete(parent.weekProgress);
+      const parentProgress = getLevelImportProgress(parentImportBranches(parent), periods, isSearchTab);
       const includeParent = (!mineOnly || parent.ownerUserId === user?.id || childRows.length > 0) &&
         (parentMatches || childRows.length > 0) &&
-        (statusFilter !== "INCOMPLETE" || !parentComplete);
+        (statusFilter !== "INCOMPLETE" || hasIncompleteImport(parentProgress) || childRows.length > 0);
       if (!includeParent) return [];
 
       return [{
@@ -237,7 +230,7 @@ export function CategoriesPage() {
         id: parent.id,
         level: 1 as const,
         isParent: true,
-        importStatus: parentComplete ? "COMPLETE" as const : "INCOMPLETE" as const,
+        importProgress: parentProgress,
         categoryLevel1: parent.categoryLevel1,
         categoryLevel2: null,
         categoryLevel3: null,
@@ -381,27 +374,24 @@ export function CategoriesPage() {
         fixed: "left",
         render: (_value, row) => renderOwner(row),
       },
-      {
-        title: "状态",
-        dataIndex: "importStatus",
-        key: "importStatus",
+      ...CATEGORY_LEVELS.map((level) => ({
+        title: `${["", "一级", "二级", "三级"][level]}导入`,
+        key: `importStatus${level}`,
         width: 110,
-        fixed: "left",
-        align: "center",
-        render: (value: CategoryTableRow["importStatus"], row) => {
-          const completedWeeks = row.level === 3
-            ? row.weekCounts?.filter((week) => isSearchTab ? (week.daysWithData ?? week.count) === 7 : week.count > 0).length ?? 0
-            : row.weekProgress?.filter((week) => week.total > 0 && week.imported === week.total).length ?? 0;
-          const totalWeeks = overview?.periods.length ?? 12;
+        fixed: "left" as const,
+        align: "center" as const,
+        render: (_value: unknown, row: CategoryTableRow) => {
+          const progress = row.importProgress[level];
+          if (!progress) return <Typography.Text type="secondary">—</Typography.Text>;
           return (
-            <Tooltip title={`最近${totalWeeks}周完成 ${completedWeeks}/${totalWeeks} 周`}>
-              <Tag color={value === "COMPLETE" ? "success" : "error"}>
-                {value === "COMPLETE" ? "已完成" : "未完成"}
+            <Tooltip title={`仅统计${["", "一级", "二级", "三级"][level]}类目直接导入的数据；最近${progress.totalWeeks}周完整 ${progress.completedWeeks}/${progress.totalWeeks} 周，已完成 ${progress.imported}/${progress.total} 个类目。`}>
+              <Tag color={progress.complete ? "success" : "error"}>
+                {progress.complete ? "已完成" : "未完成"}
               </Tag>
             </Tooltip>
           );
         },
-      },
+      })),
     ];
     const weekColumns: ColumnsType<CategoryTableRow> = (overview?.periods ?? []).map((period) => ({
       title: (
@@ -434,7 +424,7 @@ export function CategoriesPage() {
         <div>
           <div className="eyebrow">CATEGORY TRACKING</div>
           <Typography.Title level={2}>类目管理</Typography.Title>
-          <Typography.Text type="secondary">{isSearchTab ? "分别检查搜索词和核心词的日维度数据；每周7天都有记录才算完整，三级类目优先继承二级类目负责人。" : "分别查看新品流量和交易增速最近12周的导入情况，支持按三级类目追踪。"}</Typography.Text>
+          <Typography.Text type="secondary">{isSearchTab ? "一级、二级、三级导入状态分别统计最近12周的直接导入数据；搜索词和核心词独立检查，每周7天都有记录才算完整。" : "分别查看新品流量和交易增速最近12周的导入情况；一级、二级、三级导入状态独立判断。"}</Typography.Text>
         </div>
         {isAdmin && (
           <Space wrap>
@@ -455,7 +445,7 @@ export function CategoriesPage() {
       />
 
       <div className="import-summary-grid category-summary-grid">
-        <div><span>统计末级分类</span><strong>{summary.total}</strong></div>
+        <div><span>统计各级类目</span><strong>{summary.total}</strong></div>
         <div><span>最近12周已完成</span><strong>{summary.complete}</strong></div>
         <div><span>最近12周未完成</span><strong>{summary.incomplete}</strong></div>
         <div><span>整体完成率</span><strong>{summary.rate}%</strong></div>
@@ -510,6 +500,8 @@ export function CategoriesPage() {
           locale={{ emptyText: <Empty description={statusFilter === "INCOMPLETE" ? "所有类目最近12周均已完成导入" : mineOnly ? "暂时没有分配给你的类目" : "暂无类目，请先添加类目或导入数据"} /> }}
         />
         <div className="category-legend">
+          <span>一级：无二级＋无三级数据；二级：实际二级下的无三级数据；三级：实际三级数据</span>
+          <span>各级独立判断，— 表示该行不涉及此层级或暂无该层级类目</span>
           {isSearchTab ? <>
             <span><Tag color="success">7/7天</Tag> 该周每天均有搜索词记录</span>
             <span><Tag color="warning">1～6/7天</Tag> 该周数据不完整</span>
@@ -520,7 +512,7 @@ export function CategoriesPage() {
             <span><Tag color="error">未完成</Tag> 至少有一个周期缺失</span>
             <span><Tag color="success">已导入</Tag> 有商品记录</span>
             <span><Tag>缺失</Tag> 该周没有入库记录</span>
-            <span><Tag color="warning">部分完成</Tag> 一级或二级类目下仍有三级分类缺失</span>
+            <span><Tag color="warning">部分完成</Tag> 周进度汇总中仍有数据分支缺失</span>
           </>}
         </div>
       </Card>

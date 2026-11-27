@@ -76,6 +76,8 @@ test("类目登记表返回12周进度，并让三级类目逐级继承负责人
   assert.equal(noLevel2Child.ownerUserId, "employee-1");
   assert.equal(noLevel2Child.inherited, true);
   assert.equal(noLevel2Child.weekCounts[11].count, 2);
+  assert.equal(parent.weekCounts[11].count, 2);
+  assert.equal(parent.weekCounts[10].count, 0);
 
   assert.deepEqual(parent.weekProgress[11], {
     weekStart: result.periods[11].weekStart,
@@ -135,6 +137,8 @@ test("搜索词榜单按三级分支独立统计7天覆盖，一级类目数据�
   assert.equal(unclassified.weekCounts[11].daysWithData, 7);
   assert.equal(unclassified.weekCounts[11].recordCount, 35);
   assert.equal(unclassified.ownerUserId, "employee-1");
+  assert.equal(parent.weekCounts[11].daysWithData, 7);
+  assert.equal(parent.weekCounts[11].recordCount, 35);
   assert.deepEqual(parent.weekProgress[11], {
     weekStart: result.periods[11].weekStart,
     imported: 1,

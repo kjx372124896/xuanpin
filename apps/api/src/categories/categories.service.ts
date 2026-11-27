@@ -215,6 +215,7 @@ export class CategoriesService {
           responsibleUserName: parent.responsibleUser?.name ?? null,
           ownerUserId: parent.responsibleUserId,
           ownerName: parent.responsibleUser?.name ?? null,
+          weekCounts: readWeekCounts(parent.categoryLevel1, NO_SECOND_LEVEL_CATEGORY, NO_THIRD_LEVEL_CATEGORY),
           weekProgress: makeProgress(parentBranches),
           children,
         };

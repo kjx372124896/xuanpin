@@ -1,6 +1,6 @@
 {
   "name": "@selection/web",
-  "version": "0.6.2",
+  "version": "0.6.3",
   "private": true,
   "type": "module",
   "scripts": {
@@ -8,7 +8,7 @@
     "build": "tsc -b && vite build",
     "preview": "vite preview --host 0.0.0.0",
     "typecheck": "tsc -b --pretty false",
-    "test": "tsx --test src/auth/session-cache.test.ts"
+    "test": "tsx --test src/auth/session-cache.test.ts src/pages/category-import-progress.test.ts"
   },
   "dependencies": {
     "@ant-design/icons": "^6.3.4",
