@@ -312,7 +312,8 @@ export class SearchTrendsService {
 
     const whereSql = Prisma.join(conditions, " AND ");
     const periodWhereSql = Prisma.join(periodConditions, " AND ");
-    const selectedConditions: Prisma.Sql[] = [];
+    // 与“当期日均”的有效天数口径一致，在计数和分页前排除数据不足的搜索词。
+    const selectedConditions: Prisma.Sql[] = [Prisma.sql`COALESCE(metrics."currentDaysWithData", 0) > 3`];
     const memberKeyword = viewer.memberKeyword?.trim();
     const memberWhere: Prisma.UserWhereInput = {
       AND: [

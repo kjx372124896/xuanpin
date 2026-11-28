@@ -168,10 +168,10 @@ integration("PostgreSQL：搜索词收藏隔离账号和分组，成员筛选、
     }));
     const otherCategory = { ...identities[0], categoryName: "另一个类目" };
     const otherAdminOnly = { ...identities[0], searchTerm: `${prefix}-other-admin` };
-    await prisma!.searchTermHistory.createMany({ data: [...identities, otherCategory, otherAdminOnly].map((identity, index) => ({
+    await prisma!.searchTermHistory.createMany({ data: [...identities, otherCategory, otherAdminOnly].flatMap((identity, index) => Array.from({ length: 4 }, (_, day) => ({
       ...identity, categoryLevel1: identity.categoryName, categoryLevel2: "无二级类目",
-      searchDate: new Date("2026-10-31T00:00:00Z"), rank: index + 1, searchPeopleMedian: 100,
-    })) });
+      searchDate: new Date(Date.UTC(2026, 9, 28 + day)), rank: index + 1, searchPeopleMedian: 100,
+    }))) });
     const service = new SearchTrendsService(prisma as never);
     for (const identity of identities) await service.favorite(users[0].id, identity);
     await service.favorite(users[0].id, identities[0]);
@@ -312,10 +312,12 @@ integration("PostgreSQL：搜索词、排名和人数均相同时，不同类目
       searchTerm, categoryName: `review-category-${String(index).padStart(2, "0")}`, categoryLevel1: `review-category-${String(index).padStart(2, "0")}`, categoryLevel2: "无二级类目", searchTermType: "核心词", boardType: "热搜榜", dimension: "日",
       searchDate: "2026-11-23", searchPeopleRaw: "100", searchPeopleMedian: 100, rank: 1, sourceFileId: source.files[0].id,
     }));
-    await upsertHistories(prisma!, "search", rows);
+    await upsertHistories(prisma!, "search", rows.flatMap((row) => Array.from({ length: 4 }, (_, day) => ({
+      ...row, searchDate: `2026-11-${23 + day}`,
+    }))));
     const service = new SearchTrendsService(prisma as never);
     for (const sortBy of ["latestRank", "growthRate"]) {
-      const filters = { startDate: "2026-11-23", endDate: "2026-11-23", keyword: searchTerm, sortBy, pageSize: 10 };
+      const filters = { startDate: "2026-11-23", endDate: "2026-11-26", keyword: searchTerm, sortBy, pageSize: 10 };
       const first = await service.list({ ...filters, page: 1 });
       const second = await service.list({ ...filters, page: 2 });
       const categories = [...first.items, ...second.items].map((item) => item.categoryName);
@@ -478,12 +480,12 @@ integration("PostgreSQL：搜索趋势按一级、二级类目组合筛选，日
     { categoryName: `${otherLevel1} / 家庭整理用具`, categoryLevel1: otherLevel1, categoryLevel2: "家庭整理用具", value: 400 },
   ];
   try {
-    await upsertHistories(prisma!, "search", rows.flatMap((row) => ["2026-09-01", "2026-10-01"].map((date, index) => ({
+    await upsertHistories(prisma!, "search", rows.flatMap((row) => ["2026-09-01", "2026-10-01", "2026-10-02", "2026-10-03", "2026-10-04"].map((date, index) => ({
       ...row, searchTerm, searchTermType: "核心词", boardType: "热搜榜", dimension: "日", searchDate: date,
-      searchPeopleRaw: String(row.value * (index + 1)), searchPeopleMedian: row.value * (index + 1), sourceFileId: source.files[0].id,
+      searchPeopleRaw: String(row.value * (index === 0 ? 1 : 2)), searchPeopleMedian: row.value * (index === 0 ? 1 : 2), sourceFileId: source.files[0].id,
     }))));
     const service = new SearchTrendsService(prisma as never);
-    const filters = { startDate: "2026-10-01", endDate: "2026-10-01", keyword: searchTerm };
+    const filters = { startDate: "2026-10-01", endDate: "2026-10-04", keyword: searchTerm };
     const parent = await service.list({ ...filters, categoryLevel1: level1 });
     assert.equal(parent.total, 2);
     const child = await service.list({ ...filters, categoryLevel1: [level1], categoryLevel2: ["家庭整理用具"] });
@@ -512,6 +514,49 @@ integration("PostgreSQL：搜索趋势按一级、二级类目组合筛选，日
   }
 });
 
+integration("PostgreSQL：搜索趋势排除当期有效0至3天，保留4天，空值和对比期不计入且分页总数一致", async () => {
+  const prefix = `effective-days-${unique()}`;
+  const identity = (name: string) => ({
+    searchTerm: `${prefix}-${name}`, categoryName: "有效天数测试", categoryLevel1: "有效天数测试",
+    categoryLevel2: "无二级类目",
+    searchTermType: "核心词", boardType: "热搜榜", dimension: "日",
+  });
+  try {
+    // 每个词当期都有4条记录，只有中值非空的日期才计入有效天数；0也是有效数值。
+    await prisma!.searchTermHistory.createMany({ data: [
+      ...Array.from({ length: 4 }, (_, validDays) => Array.from({ length: 4 }, (_, day) => ({
+        ...identity(`excluded-${validDays}`), searchDate: new Date(Date.UTC(2026, 9, day + 1)),
+        rank: 1, searchPeopleMedian: day < validDays ? 100 : null,
+      }))).flat(),
+      ...Array.from({ length: 4 }, (_, validDays) => Array.from({ length: 7 }, (_, day) => ({
+        ...identity(`excluded-${validDays}`), searchDate: new Date(Date.UTC(2026, 8, day + 1)), searchPeopleMedian: 100,
+      }))).flat(),
+      ...Array.from({ length: 12 }, (_, index) => Array.from({ length: 4 }, (_, day) => ({
+        ...identity(`included-${String(index).padStart(2, "0")}`), searchDate: new Date(Date.UTC(2026, 9, day + 1)),
+        rank: index + 10, searchPeopleMedian: index === 0 ? 0 : 100,
+      }))).flat(),
+    ] });
+    const service = new SearchTrendsService(prisma as never);
+    const filters = { startDate: "2026-10-01", endDate: "2026-10-07", keyword: prefix, pageSize: 10 };
+    const first = await service.list(filters);
+    const second = await service.list({ ...filters, page: 2 });
+    assert.equal(first.total, 12);
+    assert.equal(second.total, 12);
+    assert.equal(first.totalPages, 2);
+    assert.equal(first.items.length, 10);
+    assert.equal(second.items.length, 2);
+    const items = [...first.items, ...second.items];
+    assert.equal(new Set(items.map((item) => item.searchTerm)).size, 12);
+    assert.ok(items.every((item) => item.searchTerm.includes("included-") && item.currentDaysWithData === 4));
+    assert.equal(first.items[0].currentDailyAverage, 0);
+    const shortPeriod = await service.list({ ...filters, endDate: "2026-10-03" });
+    assert.equal(shortPeriod.total, 0);
+    assert.deepEqual(shortPeriod.items, []);
+  } finally {
+    await prisma!.searchTermHistory.deleteMany({ where: { searchTerm: { startsWith: prefix } } });
+  }
+});
+
 integration("PostgreSQL：对比期缺失的正数搜索词按100%展示、筛选和排序，正常增长率不受影响", async () => {
   const source = await sourceFiles();
   const prefix = `growth-${unique()}`;
@@ -523,10 +568,10 @@ integration("PostgreSQL：对比期缺失的正数搜索词按100%展示、筛�
   try {
     await upsertHistories(prisma!, "search", [
       ...["2026-10-01", "2026-10-02", "2026-10-03", "2026-10-04"].map((date) => row("new", date, 50_925)),
-      row("normal", "2026-09-01", 100), row("normal", "2026-10-01", 150),
-      row("high", "2026-09-01", 100), row("high", "2026-10-01", 250),
-      row("empty-zero", "2026-10-01", 0),
-      row("previous-zero", "2026-09-01", 0), row("previous-zero", "2026-10-01", 10),
+      row("normal", "2026-09-01", 100), row("high", "2026-09-01", 100), row("previous-zero", "2026-09-01", 0),
+      ...["2026-10-01", "2026-10-02", "2026-10-03", "2026-10-04"].flatMap((date) => [
+        row("normal", date, 150), row("high", date, 250), row("empty-zero", date, 0), row("previous-zero", date, 10),
+      ]),
     ]);
     const service = new SearchTrendsService(prisma as never);
     const filters = { startDate: "2026-10-01", endDate: "2026-10-31", keyword: prefix, sortBy: "growthRate", sortOrder: "desc" };

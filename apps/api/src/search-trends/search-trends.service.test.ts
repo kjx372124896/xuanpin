@@ -73,7 +73,7 @@ function favoriteGroup(identity = favoriteIdentity) {
   return {
     ...identity, classificationName: null, latestDate: new Date("2026-10-31T00:00:00Z"), latestRank: 1,
     latestSearchPeopleRaw: "100", latestSearchPeopleMin: 90, latestSearchPeopleMax: 110, latestSearchPeopleMedian: 100,
-    daysWithData: 1, previousDailyAverage: 50, currentDailyAverage: 100, previousDaysWithData: 1, currentDaysWithData: 1, total: 2n,
+    daysWithData: 4, previousDailyAverage: 50, currentDailyAverage: 100, previousDaysWithData: 1, currentDaysWithData: 4, total: 2n,
   };
 }
 
@@ -101,6 +101,19 @@ test("仅看我的收藏在分页与计数之前按完整分组过滤，账号�
   assert.ok(query.sql.indexOf("EXISTS") < query.sql.indexOf("COUNT(*)::bigint"));
   assert.equal(query.sql.includes("member-A"), false);
   assert.equal(calls.favoriteQueries.length, 0);
+});
+
+test("搜索词列表和成员收藏均在计数、排序与分页前过滤当期日均有效天数不超过3天的数据", async () => {
+  for (const viewer of [{}, { userId: "admin-A", teamFavorites: true }]) {
+    const { prisma, calls } = createPrisma();
+    await new SearchTrendsService(prisma as never).list(filters, viewer);
+    const query = calls.rawQueries[0];
+    assert.match(query.sql, /COUNT\("搜索人数中值"\) FILTER \(WHERE "统计日期" >= .*? AND "统计日期" <= .*?\)::int AS "currentDaysWithData"/);
+    const condition = query.sql.indexOf('COALESCE(metrics."currentDaysWithData", 0) > 3');
+    assert.ok(condition > query.sql.indexOf("selected AS MATERIALIZED"));
+    assert.ok(condition < query.sql.indexOf("COUNT(*)::bigint AS total"));
+    assert.ok(condition < query.sql.indexOf("page_rows AS"));
+  }
 });
 
 test("管理员成员收藏保留自己的收藏状态并返回成员信息，成员关键词同步用于列表和成员明细", async () => {
