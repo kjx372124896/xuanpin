@@ -109,11 +109,49 @@ test("搜索词列表和成员收藏均在计数、排序与分页前过滤当�
     await new SearchTrendsService(prisma as never).list(filters, viewer);
     const query = calls.rawQueries[0];
     assert.match(query.sql, /COUNT\("搜索人数中值"\) FILTER \(WHERE "统计日期" >= .*? AND "统计日期" <= .*?\)::int AS "currentDaysWithData"/);
-    const condition = query.sql.indexOf('COALESCE(metrics."currentDaysWithData", 0) > 3');
+    const condition = query.sql.indexOf('COALESCE(metrics."currentDaysWithData", 0) > ?');
+    assert.ok(query.values.includes(3));
     assert.ok(condition > query.sql.indexOf("selected AS MATERIALIZED"));
     assert.ok(condition < query.sql.indexOf("COUNT(*)::bigint AS total"));
     assert.ok(condition < query.sql.indexOf("page_rows AS"));
   }
+});
+
+test("日均列四项筛选在计数分页前组合且数值通过SQL参数绑定", async () => {
+  const { prisma, calls } = createPrisma();
+  await new SearchTrendsService(prisma as never).list({ ...filters, metricFilters: JSON.stringify({
+    currentDaysWithData: { operator: "eq", value: 2 },
+    previousDaysWithData: { operator: "gte", value: 10 },
+    currentDailyAverage: { operator: "between", value: 1234, max: 5678 },
+    previousDailyAverage: { operator: "gt", value: 9012 },
+  }) });
+  const query = calls.rawQueries[0];
+  assert.match(query.sql, /COALESCE\(metrics\."currentDaysWithData", 0\) = \?/);
+  assert.match(query.sql, /COALESCE\(metrics\."previousDaysWithData", 0\) >= \?/);
+  assert.match(query.sql, /ROUND\(metrics\."currentDailyAverage"\) BETWEEN \? AND \?/);
+  assert.match(query.sql, /ROUND\(metrics\."previousDailyAverage"\) > \?/);
+  for (const value of [2, 10, 1234, 5678, 9012]) assert.ok(query.values.includes(value));
+  assert.equal(query.sql.includes("1234"), false);
+  assert.ok(query.sql.indexOf('ROUND(metrics."previousDailyAverage") > ?') < query.sql.indexOf("COUNT(*)::bigint AS total"));
+});
+
+test("无效日均筛选拒绝查询，包括未知字段、操作符、非数字、负数、非整数天数和倒置区间", async () => {
+  const { prisma, calls } = createPrisma();
+  const service = new SearchTrendsService(prisma as never);
+  for (const metricFilters of ["{", "null", "[]", "x".repeat(2001), ...[
+    { injectedField: { operator: "gt", value: 1 } },
+    { currentDaysWithData: { operator: "DROP TABLE", value: 1 } },
+    { currentDaysWithData: { operator: "gt", value: 1.5 } },
+    { currentDaysWithData: { operator: "eq", value: -1 } },
+    { currentDailyAverage: { operator: "eq", value: "100" } },
+    { currentDailyAverage: { operator: "eq", value: null } },
+    { previousDailyAverage: { operator: "between", value: 10 } },
+    { previousDailyAverage: { operator: "between", value: 10, max: 5 } },
+    { previousDaysWithData: { operator: "between", value: 1, max: 2.5 } },
+  ].map((value) => JSON.stringify(value))]) {
+    await assert.rejects(service.list({ ...filters, metricFilters }), (error: any) => error.getStatus() === 400);
+  }
+  assert.equal(calls.rawQueries.length, 0);
 });
 
 test("管理员成员收藏保留自己的收藏状态并返回成员信息，成员关键词同步用于列表和成员明细", async () => {

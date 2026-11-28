@@ -1,5 +1,6 @@
 import { BadRequestException, Injectable, NotFoundException, ServiceUnavailableException } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
+import { parseSearchTrendMetricFilters, type SearchTrendMetricFilters } from "./search-trend-filters";
 import { PrismaService } from "../prisma/prisma.service";
 import { buildSearchTrendComparisonPeriods, calculateSearchTrendGrowthRate, shiftUtcMonthsClamped, type SearchTrendComparisonMode } from "./search-trends.helpers";
 
@@ -22,6 +23,7 @@ type SearchTrendFilters = {
   page?: string | number;
   pageSize?: string | number;
   favoritesOnly?: string | boolean;
+  metricFilters?: string;
 };
 
 type SearchTrendViewer = { userId?: string; teamFavorites?: boolean; memberKeyword?: string };
@@ -141,6 +143,34 @@ function groupKey(value: { searchTerm: string; categoryName: string; searchTermT
   return JSON.stringify([value.searchTerm, value.categoryName, value.searchTermType, value.boardType, value.dimension]);
 }
 
+function metricFilterConditions(raw: string | undefined): Prisma.Sql[] {
+  let filters: SearchTrendMetricFilters;
+  try {
+    if (raw !== undefined && (typeof raw !== "string" || raw.length > 2000)) throw new Error("日均筛选参数无效。");
+    filters = parseSearchTrendMetricFilters(raw === undefined ? {} : JSON.parse(raw));
+  } catch (error) {
+    throw new BadRequestException(error instanceof SyntaxError ? "日均筛选参数格式无效。" : (error as Error).message);
+  }
+  const columns = {
+    currentDaysWithData: Prisma.sql`COALESCE(metrics."currentDaysWithData", 0)`,
+    previousDaysWithData: Prisma.sql`COALESCE(metrics."previousDaysWithData", 0)`,
+    currentDailyAverage: Prisma.sql`ROUND(metrics."currentDailyAverage")`,
+    previousDailyAverage: Prisma.sql`ROUND(metrics."previousDailyAverage")`,
+  };
+  return Object.entries(filters).flatMap(([key, filter]) => {
+    const column = columns[key as keyof typeof columns];
+    switch (filter.operator) {
+      case "all": return [];
+      case "gt": return [Prisma.sql`${column} > ${filter.value}`];
+      case "gte": return [Prisma.sql`${column} >= ${filter.value}`];
+      case "eq": return [Prisma.sql`${column} = ${filter.value}`];
+      case "lt": return [Prisma.sql`${column} < ${filter.value}`];
+      case "lte": return [Prisma.sql`${column} <= ${filter.value}`];
+      case "between": return [Prisma.sql`${column} BETWEEN ${filter.value} AND ${filter.max}`];
+    }
+  });
+}
+
 @Injectable()
 export class SearchTrendsService {
   private readonly optionsCacheTtlMs = 5_000;
@@ -255,6 +285,7 @@ export class SearchTrendsService {
   }
 
   private async listInternal(filters: SearchTrendFilters, viewer: SearchTrendViewer) {
+    const selectedConditions = metricFilterConditions(filters.metricFilters);
     // 前端通常会传入完整日期范围；只有缺少任一端点时才需要查询最新日期来补默认值。
     const latestDate = !filters.startDate || !filters.endDate
       ? (await this.prisma.searchTermHistory.aggregate({ _max: { searchDate: true } }))._max.searchDate ?? new Date()
@@ -312,8 +343,6 @@ export class SearchTrendsService {
 
     const whereSql = Prisma.join(conditions, " AND ");
     const periodWhereSql = Prisma.join(periodConditions, " AND ");
-    // 与“当期日均”的有效天数口径一致，在计数和分页前排除数据不足的搜索词。
-    const selectedConditions: Prisma.Sql[] = [Prisma.sql`COALESCE(metrics."currentDaysWithData", 0) > 3`];
     const memberKeyword = viewer.memberKeyword?.trim();
     const memberWhere: Prisma.UserWhereInput = {
       AND: [

@@ -313,6 +313,15 @@ a { color: #315efb; }
 .search-trend-filter-actions { grid-column: 6; grid-row: 2; display: flex; min-height: 34px; align-items: center; justify-content: flex-end; gap: 6px; white-space: nowrap; }
 .search-trend-filter-actions .ant-btn { padding-inline: 10px; }
 .search-trend-filter-hint { display: block; margin-top: 7px; font-size: 10px; }
+.search-metric-filter { display: flex; flex-direction: column; gap: 12px; width: 320px; max-width: calc(100vw - 32px); padding: 16px; }
+.search-metric-filter-field { display: flex; flex-direction: column; gap: 6px; }
+.search-metric-filter-field > .ant-select { width: 100%; }
+.search-metric-filter-values { display: flex; align-items: center; gap: 8px; }
+.search-metric-filter-values .ant-input-number-group-wrapper,
+.search-metric-filter-values .ant-input-number { flex: 1; width: 100%; min-width: 0; }
+.search-metric-filter-values .ant-input-number-group-wrapper .ant-input-number { width: 100%; }
+.search-metric-filter-note { font-size: 11px; }
+.search-metric-filter-actions { justify-content: flex-end; }
 .search-trends-table-card { flex: 1 1 0; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
 .search-trends-table-card .ant-card-body { min-width: 0; }
 .search-trends-table-card .table-heading { margin-bottom: 9px; }

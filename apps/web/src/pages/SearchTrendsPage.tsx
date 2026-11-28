@@ -7,6 +7,7 @@ import { FilterOutlined, ReloadOutlined, SearchOutlined, StarFilled, StarOutline
 import dayjs, { type Dayjs } from "dayjs";
 import { api, errorMessage } from "../api";
 import { useAuth } from "../auth/AuthContext";
+import { SearchTrendMetricFilterDropdown, defaultSearchTrendMetricFilters, type SearchTrendMetricFilters, type SearchTrendMetricPeriod } from "../components/SearchTrendMetricFilter";
 
 interface SearchMetric {
   raw: string | null;
@@ -260,6 +261,7 @@ export function SearchTrendsPage() {
   const [favoriteLoadingKey, setFavoriteLoadingKey] = useState<string | null>(null);
   const [draft, setDraft] = useState<SearchFilters>({});
   const [filters, setFilters] = useState<SearchFilters>({});
+  const [metricFilters, setMetricFilters] = useState<SearchTrendMetricFilters>(defaultSearchTrendMetricFilters);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(50);
   const [sort, setSort] = useState<SearchTrendSort>({ field: "latestRank", order: "ascend" });
@@ -298,13 +300,14 @@ export function SearchTrendsPage() {
   }, [optionsQuery.data?.latestDate, optionsQuery.isLoading, initialized]);
 
   const trendsQuery = useQuery({
-    queryKey: ["searchTrends", user?.id, showTeamFavorites, filters, page, pageSize, sort],
+    queryKey: ["searchTrends", user?.id, showTeamFavorites, filters, metricFilters, page, pageSize, sort],
     queryFn: async ({ signal }) => {
       const params: Record<string, string | number> = {
         page,
         pageSize,
         sortBy: sort.field,
         sortOrder: sort.order === "ascend" ? "asc" : "desc",
+        metricFilters: JSON.stringify(metricFilters),
       };
       if (filters.startDate) params.startDate = filters.startDate;
       if (filters.endDate) params.endDate = filters.endDate;
@@ -330,7 +333,7 @@ export function SearchTrendsPage() {
   useEffect(() => {
     const tableBody = tableWrapperRef.current?.querySelector<HTMLElement>(".ant-table-body");
     if (tableBody) tableBody.scrollTop = 0;
-  }, [page, pageSize, filters, sort, showTeamFavorites]);
+  }, [page, pageSize, filters, metricFilters, sort, showTeamFavorites]);
 
   useEffect(() => {
     const container = tableWrapperRef.current;
@@ -379,6 +382,23 @@ export function SearchTrendsPage() {
       setFavoriteLoadingKey(null);
     }
   }, [filters.favoritesOnly, showTeamFavorites, queryClient]);
+
+  const metricColumnFilter = useCallback((period: SearchTrendMetricPeriod) => {
+    const days = metricFilters[`${period}DaysWithData`];
+    const average = metricFilters[`${period}DailyAverage`];
+    const active = [days, average].some((filter) => filter && filter.operator !== "all");
+    const label = period === "current" ? "当期日均" : "对比期日均";
+    return {
+      filtered: active,
+      filterOnClose: false,
+      filterDropdownProps: { destroyOnHidden: true },
+      filterIcon: (filtered: boolean) => <FilterOutlined aria-label={`筛选${label}`} style={{ color: filtered ? "#1677ff" : undefined }} />,
+      filterDropdown: ({ close, visible }: { close: () => void; visible: boolean }) => <SearchTrendMetricFilterDropdown
+        period={period} filters={metricFilters} open={visible} close={close}
+        onApply={(patch) => { setMetricFilters((current) => ({ ...current, ...patch })); setPage(1); }}
+      />,
+    };
+  }, [metricFilters]);
 
   const columns = useMemo<ColumnsType<SearchTrendItem>>(() => [
     {
@@ -456,6 +476,7 @@ export function SearchTrendsPage() {
       dataIndex: "previousDailyAverage",
       key: "previousDailyAverage",
       width: 120,
+      ...metricColumnFilter("previous"),
       render: (value: number | null, item) => (
         <div className="metric-summary">
           <strong>{formatDailyAverage(value)}</strong>
@@ -468,6 +489,7 @@ export function SearchTrendsPage() {
       dataIndex: "currentDailyAverage",
       key: "currentDailyAverage",
       width: 120,
+      ...metricColumnFilter("current"),
       render: (value: number | null, item) => (
         <div className="metric-summary">
           <strong>{formatDailyAverage(value)}</strong>
@@ -492,7 +514,7 @@ export function SearchTrendsPage() {
       key: "trend",
       render: (_value, item) => <DailySearchTrend points={item.trend} />,
     },
-  ], [sort, showTeamFavorites, favoriteLoadingKey, toggleFavorite]);
+  ], [sort, showTeamFavorites, favoriteLoadingKey, toggleFavorite, metricColumnFilter]);
 
   function applyFilters() {
     setPage(1);
@@ -509,6 +531,7 @@ export function SearchTrendsPage() {
     setDraft(defaults);
     setFilters(defaults);
     setSort({ field: "latestRank", order: "ascend" });
+    setMetricFilters(defaultSearchTrendMetricFilters());
     setPage(1);
   }
 

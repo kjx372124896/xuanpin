@@ -557,6 +557,53 @@ integration("PostgreSQL：搜索趋势排除当期有效0至3天，保留4天，
   }
 });
 
+integration("PostgreSQL：日均表头支持四项条件、天数覆盖默认值、整数日均值及含边界区间", async () => {
+  const prefix = `metric-filter-${unique()}`;
+  try {
+    await prisma!.searchTermHistory.createMany({ data: Array.from({ length: 5 }, (_, index) => {
+      const count = index + 1;
+      const identity = {
+        searchTerm: `${prefix}-${count}`, categoryName: "表头筛选测试", categoryLevel1: "表头筛选测试", categoryLevel2: "无二级类目",
+        searchTermType: "核心词", boardType: "热搜榜", dimension: "日", rank: count,
+      };
+      return [
+        ...Array.from({ length: count }, (_, day) => ({ ...identity, searchDate: new Date(Date.UTC(2026, 9, day + 1)), searchPeopleMedian: count * 100 + 0.4 })),
+        ...Array.from({ length: index }, (_, day) => ({ ...identity, searchDate: new Date(Date.UTC(2026, 8, day + 1)), searchPeopleMedian: index * 50 + 0.6 })),
+      ];
+    }).flat() });
+    const service = new SearchTrendsService(prisma as never);
+    const cases: Array<[Record<string, unknown>, number[]]> = [
+      [{}, [4, 5]],
+      [{ currentDaysWithData: { operator: "gt", value: 3 } }, [4, 5]],
+      [{ currentDaysWithData: { operator: "gte", value: 3 } }, [3, 4, 5]],
+      [{ currentDaysWithData: { operator: "eq", value: 3 } }, [3]],
+      [{ currentDaysWithData: { operator: "between", value: 2, max: 4 } }, [2, 3, 4]],
+      [{ currentDaysWithData: { operator: "lt", value: 2 } }, [1]],
+      [{ currentDaysWithData: { operator: "lte", value: 2 } }, [1, 2]],
+      [{ currentDaysWithData: { operator: "all" } }, [1, 2, 3, 4, 5]],
+      [{ currentDaysWithData: { operator: "all" }, currentDailyAverage: { operator: "eq", value: 200 } }, [2]],
+      [{ currentDaysWithData: { operator: "all" }, currentDailyAverage: { operator: "gte", value: 200 } }, [2, 3, 4, 5]],
+      [{ currentDaysWithData: { operator: "all" }, currentDailyAverage: { operator: "between", value: 200, max: 400 } }, [2, 3, 4]],
+      [{ currentDaysWithData: { operator: "all" }, previousDaysWithData: { operator: "eq", value: 0 } }, [1]],
+      [{ currentDaysWithData: { operator: "all" }, previousDaysWithData: { operator: "gte", value: 1 } }, [2, 3, 4, 5]],
+      [{ currentDaysWithData: { operator: "all" }, previousDaysWithData: { operator: "between", value: 1, max: 3 } }, [2, 3, 4]],
+      [{ currentDaysWithData: { operator: "all" }, previousDailyAverage: { operator: "eq", value: 51 } }, [2]],
+      [{ currentDaysWithData: { operator: "all" }, previousDailyAverage: { operator: "gt", value: 51 } }, [3, 4, 5]],
+      [{ currentDaysWithData: { operator: "all" }, previousDailyAverage: { operator: "between", value: 51, max: 151 } }, [2, 3, 4]],
+      [{ currentDaysWithData: { operator: "all" }, previousDailyAverage: { operator: "gte", value: 0 } }, [2, 3, 4, 5]],
+      [{ currentDaysWithData: { operator: "gte", value: 2 }, currentDailyAverage: { operator: "lt", value: 500 },
+        previousDaysWithData: { operator: "lte", value: 2 }, previousDailyAverage: { operator: "gte", value: 101 } }, [3]],
+    ];
+    for (const [metricFilters, expected] of cases) {
+      const result = await service.list({ startDate: "2026-10-01", endDate: "2026-10-31", keyword: prefix, metricFilters: JSON.stringify(metricFilters) });
+      assert.deepEqual(result.items.map((item) => item.searchTerm), expected.map((count) => `${prefix}-${count}`), JSON.stringify(metricFilters));
+      assert.equal(result.total, expected.length);
+    }
+  } finally {
+    await prisma!.searchTermHistory.deleteMany({ where: { searchTerm: { startsWith: prefix } } });
+  }
+});
+
 integration("PostgreSQL：对比期缺失的正数搜索词按100%展示、筛选和排序，正常增长率不受影响", async () => {
   const source = await sourceFiles();
   const prefix = `growth-${unique()}`;
